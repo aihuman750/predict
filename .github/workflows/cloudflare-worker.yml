@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - "worker/**"
+      - "scripts/report-core.mjs"
+      - "public/rewards-core.mjs"
       - "wrangler.toml"
       - ".github/workflows/cloudflare-worker.yml"
   workflow_dispatch:
@@ -21,6 +23,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Set Worker secrets
+        run: |
+          printf '%s' "$FEISHU_WEBHOOK" | npx wrangler@latest secret put FEISHU_WEBHOOK
+          printf '%s' "$FEISHU_SECRET" | npx wrangler@latest secret put FEISHU_SECRET
+          printf '%s' "$REPORT_TOKEN" | npx wrangler@latest secret put REPORT_TOKEN
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
 
       - name: Deploy Worker
         run: npx wrangler@latest deploy

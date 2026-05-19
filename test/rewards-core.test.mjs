@@ -6,6 +6,7 @@ import {
   buildPredictMarketUrl,
   competitionTier,
   favoriteKey,
+  findMarketForFavorite,
   filterAndSortMarkets,
   summarizeMarkets,
   toFavoriteMarket,
@@ -136,4 +137,17 @@ test("toFavoriteMarket stores the fields needed for reports and links", () => {
     expiresAtSec: NOW + 3600,
     url: "https://predict.fun/market/nexus-fdv-above-50m",
   });
+});
+
+test("findMarketForFavorite matches current market data by key, category, or question", () => {
+  assert.equal(findMarketForFavorite({ key: "2" }, markets)?.id, "2");
+  assert.equal(
+    findMarketForFavorite({ key: "missing", categorySlug: "btc-updown-5m" }, markets)?.id,
+    "1",
+  );
+  assert.equal(
+    findMarketForFavorite({ question: "Bitcoin Up or Down" }, markets)?.id,
+    "1",
+  );
+  assert.equal(findMarketForFavorite({ key: "missing" }, markets), null);
 });

@@ -1,4 +1,4 @@
-import { favoriteKey } from "../public/rewards-core.mjs";
+import { favoriteKey, findMarketForFavorite } from "../public/rewards-core.mjs";
 
 function formatCents(value) {
   const number = Number(value);
@@ -19,27 +19,8 @@ export function formatPriceDelta(current, previous) {
   return `${diff > 0 ? "+" : ""}${cents}¢`;
 }
 
-function normalizeQuestion(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
 export function findCurrentMarket(favorite, currentMarkets) {
-  const key = favorite.key || favoriteKey(favorite);
-  const preferred = currentMarkets.find((market) => favoriteKey(market) === key);
-  if (preferred) return preferred;
-
-  const category = favorite.categorySlug || favorite.category;
-  if (category) {
-    const byCategory = currentMarkets.find((market) => market.categorySlug === category || market.category === category);
-    if (byCategory) return byCategory;
-  }
-
-  const question = normalizeQuestion(favorite.question || favorite.title);
-  if (!question) return null;
-  return currentMarkets.find((market) => normalizeQuestion(market.question || market.title) === question) || null;
+  return findMarketForFavorite(favorite, currentMarkets);
 }
 
 export function buildPriceRows({ favorites, currentMarkets, previousSnapshot = {} }) {

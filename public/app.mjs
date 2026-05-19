@@ -4,6 +4,7 @@ import {
   buildPredictMarketUrl,
   competitionTier,
   favoriteKey,
+  findMarketForFavorite,
   filterAndSortMarkets,
   summarizeMarkets,
   toFavoriteMarket,
@@ -26,11 +27,15 @@ const state = {
   error: false,
   favoriteError: false,
   favoriteKeys: new Set(),
+  favoriteMarkets: [],
   favoritePending: new Set(),
   loaded: false,
   markets: [],
   maxExpireHrs: readExpireSetting(),
   query: "",
+  reportError: false,
+  reportMessage: "",
+  reportSending: false,
   sortDir: "desc",
   sortKey: "hourlyRate",
 };
@@ -133,6 +138,47 @@ function competitionBars(score) {
   `;
 }
 
+function captureRenderState({ preserveFocus, preserveScroll }) {
+  const active = document.activeElement;
+  const tableScroll = document.querySelector(".table-scroll");
+
+  return {
+    activeId: preserveFocus && active?.id ? active.id : null,
+    selectionEnd: preserveFocus && "selectionEnd" in active ? active.selectionEnd : null,
+    selectionStart: preserveFocus && "selectionStart" in active ? active.selectionStart : null,
+    tableLeft: preserveScroll ? tableScroll?.scrollLeft || 0 : 0,
+    tableTop: preserveScroll ? tableScroll?.scrollTop || 0 : 0,
+    windowX: preserveScroll ? window.scrollX : 0,
+    windowY: preserveScroll ? window.scrollY : 0,
+  };
+}
+
+function restoreRenderState(renderState) {
+  if (renderState.tableTop || renderState.tableLeft) {
+    const tableScroll = document.querySelector(".table-scroll");
+    if (tableScroll) {
+      tableScroll.scrollTop = renderState.tableTop;
+      tableScroll.scrollLeft = renderState.tableLeft;
+    }
+  }
+
+  if (renderState.windowX || renderState.windowY) {
+    window.scrollTo(renderState.windowX, renderState.windowY);
+  }
+
+  if (!renderState.activeId) return;
+  const active = document.getElementById(renderState.activeId);
+  if (!active) return;
+  active.focus({ preventScroll: true });
+  if (
+    renderState.selectionStart != null &&
+    renderState.selectionEnd != null &&
+    typeof active.setSelectionRange === "function"
+  ) {
+    active.setSelectionRange(renderState.selectionStart, renderState.selectionEnd);
+  }
+}
+
 function renderHeader() {
   return `
     <header class="pa-header">
@@ -159,7 +205,11 @@ function renderHeader() {
   `;
 }
 
-function renderPage() {
+function renderPage(options = {}) {
+  const renderState = captureRenderState({
+    preserveFocus: Boolean(options.preserveFocus),
+    preserveScroll: Boolean(options.preserveScroll),
+  });
   const app = document.querySelector("#app");
   const stats = summarizeMarkets(state.markets);
   const duplicateCategories = buildDuplicateCategorySet(state.markets);
@@ -196,6 +246,8 @@ function renderPage() {
             ${statHtml("Top-10 占比", top10Share, "占总 pts/h")}
           </div>
         </section>
+
+        ${renderFavoritesSection()}
 
         <section class="pa-card table-card">
           <div class="pa-card-head">
@@ -267,6 +319,73 @@ function renderPage() {
 
   bindEvents();
   updateClock();
+  restoreRenderState(renderState);
+}
+
+function favoriteView(favorite) {
+  const current = findMarketForFavorite(favorite, state.markets);
+  const title = favorite.title || favorite.question || current?.question || current?.title || favorite.key;
+  const url = favorite.url || buildPredictMarketUrl(current || favorite);
+  return {
+    ...favorite,
+    current,
+    expiresAtSec: current?.expiresAtSec ?? favorite.expiresAtSec,
+    noBid: current?.noBid ?? favorite.noBid,
+    title,
+    url,
+    yesBid: current?.yesBid ?? favorite.yesBid,
+  };
+}
+
+function renderFavoritesSection() {
+  const favorites = state.favoriteMarkets.map(favoriteView);
+  const statusClass = state.reportError ? "report-status error" : "report-status";
+  const reportLabel = state.reportSending ? "推送中..." : "推送最新报告";
+
+  return `
+    <section class="pa-card favorites-card">
+      <div class="pa-card-head favorites-head">
+        <div class="table-title-wrap">
+          <div class="pa-card-title">收藏列表</div>
+          <div class="pill mono">${favorites.length} 个市场</div>
+        </div>
+        <div class="report-actions">
+          ${state.reportMessage ? `<span class="${statusClass}">${escapeHtml(state.reportMessage)}</span>` : ""}
+          <button class="btn btn-sm" id="sendReportBtn" ${state.reportSending ? "disabled" : ""}>${reportLabel}</button>
+        </div>
+      </div>
+      <div class="favorite-list">
+        ${
+          favorites.length
+            ? favorites.map(renderFavoriteItem).join("")
+            : `<div class="favorite-empty muted">还没有收藏市场。点击市场前面的五角星后，会在这里汇总。</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function renderFavoriteItem(favorite) {
+  const titleHtml = favorite.url
+    ? `<a class="market-link" href="${escapeHtml(favorite.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(favorite.title)} <span aria-hidden="true">↗</span></a>`
+    : escapeHtml(favorite.title);
+  const expires = favorite.expiresAtSec ? formatDate(favorite.expiresAtSec) : "-";
+
+  return `
+    <div class="favorite-item">
+      <div class="favorite-title">
+        <button class="favorite-btn active" data-favorite-remove="${escapeHtml(favorite.key)}" title="取消收藏">★</button>
+        <div>
+          <div class="market-name">${titleHtml}</div>
+          <div class="market-meta">#${escapeHtml(favorite.id || favorite.key)} · ${escapeHtml(expires)}</div>
+        </div>
+      </div>
+      <div class="favorite-prices">
+        <span>Yes ${favorite.yesBid != null ? formatCents(favorite.yesBid, 1) : '<span class="muted">-</span>'}</span>
+        <span>No ${favorite.noBid != null ? formatCents(favorite.noBid, 1) : '<span class="muted">-</span>'}</span>
+      </div>
+    </div>
+  `;
 }
 
 function renderRows(rows, duplicateCategories) {
@@ -322,11 +441,12 @@ function renderRows(rows, duplicateCategories) {
 }
 
 function bindEvents() {
-  document.querySelector("#refreshBtn")?.addEventListener("click", () => loadRewards({ force: true }));
+  document.querySelector("#refreshBtn")?.addEventListener("click", () => loadRewards({ force: true, preserveScroll: true }));
   document.querySelector("#searchInput")?.addEventListener("input", (event) => {
     state.query = event.target.value;
-    renderPage();
+    renderPage({ preserveFocus: true, preserveScroll: true });
   });
+  document.querySelector("#sendReportBtn")?.addEventListener("click", sendLatestReport);
   document.querySelector("#themeBtn")?.addEventListener("click", toggleTheme);
 
   for (const button of document.querySelectorAll("[data-accent]")) {
@@ -342,7 +462,7 @@ function bindEvents() {
         state.sortKey = key;
         state.sortDir = "desc";
       }
-      renderPage();
+      renderPage({ preserveScroll: true });
     });
   }
 
@@ -351,7 +471,7 @@ function bindEvents() {
       const value = button.dataset.expire;
       state.maxExpireHrs = value === "all" ? null : Number(value);
       localStorage.setItem("predict_alpha_max_expire_hrs", value);
-      renderPage();
+      renderPage({ preserveScroll: true });
     });
   }
 
@@ -359,12 +479,16 @@ function bindEvents() {
     button.addEventListener("click", () => {
       state.dense = button.dataset.density === "dense";
       localStorage.setItem("predict_alpha_dense", state.dense ? "1" : "0");
-      renderPage();
+      renderPage({ preserveScroll: true });
     });
   }
 
   for (const button of document.querySelectorAll("[data-favorite-key]")) {
     button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteKey));
+  }
+
+  for (const button of document.querySelectorAll("[data-favorite-remove]")) {
+    button.addEventListener("click", () => removeFavorite(button.dataset.favoriteRemove));
   }
 }
 
@@ -403,8 +527,9 @@ function favoritesEndpoint(path = "") {
   return `${FAVORITES_API_BASE}${path}`;
 }
 
-function setFavoriteKeys(favorites) {
-  state.favoriteKeys = new Set((Array.isArray(favorites) ? favorites : []).map((item) => item.key).filter(Boolean));
+function setFavorites(favorites) {
+  state.favoriteMarkets = Array.isArray(favorites) ? favorites : [];
+  state.favoriteKeys = new Set(state.favoriteMarkets.map((item) => item.key).filter(Boolean));
 }
 
 async function loadFavorites() {
@@ -412,7 +537,7 @@ async function loadFavorites() {
     const response = await fetch(favoritesEndpoint("/api/favorites"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
-    setFavoriteKeys(payload.favorites);
+    setFavorites(payload.favorites);
     state.favoriteError = false;
   } catch (error) {
     console.error(error);
@@ -424,36 +549,95 @@ async function loadFavorites() {
 
 async function toggleFavorite(key) {
   if (!key || state.favoritePending.has(key)) return;
+  if (state.favoriteKeys.has(key)) {
+    await removeFavorite(key);
+    return;
+  }
+
   const market = state.markets.find((item) => favoriteKey(item) === key);
   if (!market) return;
 
-  const wasFavorite = state.favoriteKeys.has(key);
   state.favoritePending.add(key);
-  renderPage();
+  renderPage({ preserveScroll: true });
 
   try {
-    const response = await fetch(favoritesEndpoint(`/api/favorites${wasFavorite ? `/${encodeURIComponent(key)}` : ""}`), {
-      body: wasFavorite ? undefined : JSON.stringify({ market: toFavoriteMarket(market) }),
-      headers: wasFavorite ? undefined : { "content-type": "application/json" },
-      method: wasFavorite ? "DELETE" : "POST",
+    const response = await fetch(favoritesEndpoint("/api/favorites"), {
+      body: JSON.stringify({ market: toFavoriteMarket(market) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
     });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
-    setFavoriteKeys(payload.favorites);
+    setFavorites(payload.favorites);
     state.favoriteError = false;
   } catch (error) {
     console.error(error);
     state.favoriteError = true;
   } finally {
     state.favoritePending.delete(key);
-    renderPage();
+    renderPage({ preserveScroll: true });
   }
 }
 
-async function loadRewards({ force = false } = {}) {
+async function removeFavorite(key) {
+  if (!key || state.favoritePending.has(key)) return;
+
+  state.favoritePending.add(key);
+  renderPage({ preserveScroll: true });
+
+  try {
+    const response = await fetch(favoritesEndpoint(`/api/favorites/${encodeURIComponent(key)}`), {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    setFavorites(payload.favorites);
+    state.favoriteError = false;
+  } catch (error) {
+    console.error(error);
+    state.favoriteError = true;
+  } finally {
+    state.favoritePending.delete(key);
+    renderPage({ preserveScroll: true });
+  }
+}
+
+async function sendLatestReport() {
+  if (state.reportSending) return;
+
+  state.reportSending = true;
+  state.reportError = false;
+  state.reportMessage = "";
+  renderPage({ preserveScroll: true });
+
+  try {
+    const response = await fetch(favoritesEndpoint("/api/report/send"), {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const sentAt = payload.sentAt ? new Date(payload.sentAt) : new Date();
+    const time = sentAt.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      hour12: false,
+      minute: "2-digit",
+      timeZone: "Asia/Shanghai",
+    });
+    state.reportMessage = `已推送 ${time} · ${payload.favoriteCount ?? state.favoriteKeys.size} 个市场`;
+  } catch (error) {
+    console.error(error);
+    state.reportError = true;
+    state.reportMessage = "推送失败，请稍后重试";
+  } finally {
+    state.reportSending = false;
+    renderPage({ preserveScroll: true });
+  }
+}
+
+async function loadRewards({ force = false, preserveScroll = false } = {}) {
   state.loaded = false;
   if (force) state.error = false;
-  renderPage();
+  renderPage({ preserveScroll });
 
   try {
     const response = await fetch(rewardsEndpoint());
@@ -466,7 +650,7 @@ async function loadRewards({ force = false } = {}) {
     state.error = true;
   } finally {
     state.loaded = true;
-    renderPage();
+    renderPage({ preserveScroll });
   }
 }
 

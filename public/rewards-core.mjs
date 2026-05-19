@@ -148,6 +148,13 @@ function slugify(value) {
   return slug || null;
 }
 
+function normalizeQuestion(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 export function favoriteKey(market) {
   if (!market) return null;
   const stableKey = market.id || market.slug || market.categorySlug || market.category;
@@ -170,6 +177,24 @@ export function toFavoriteMarket(market) {
     expiresAtSec: market.expiresAtSec ?? null,
     url: buildPredictMarketUrl(market),
   };
+}
+
+export function findMarketForFavorite(favorite, currentMarkets = []) {
+  if (!favorite || !Array.isArray(currentMarkets)) return null;
+
+  const key = favorite.key || favoriteKey(favorite);
+  const preferred = key ? currentMarkets.find((market) => favoriteKey(market) === key) : null;
+  if (preferred) return preferred;
+
+  const category = favorite.categorySlug || favorite.category;
+  if (category) {
+    const byCategory = currentMarkets.find((market) => market.categorySlug === category || market.category === category);
+    if (byCategory) return byCategory;
+  }
+
+  const question = normalizeQuestion(favorite.question || favorite.title);
+  if (!question) return null;
+  return currentMarkets.find((market) => normalizeQuestion(market.question || market.title) === question) || null;
 }
 
 export function summarizeMarkets(markets) {
