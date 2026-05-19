@@ -140,6 +140,38 @@ export function buildPredictMarketUrl(market) {
   return `https://predict.fun/market/${encodeURIComponent(String(slug))}`;
 }
 
+function slugify(value) {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || null;
+}
+
+export function favoriteKey(market) {
+  if (!market) return null;
+  const stableKey = market.id || market.slug || market.categorySlug || market.category;
+  return stableKey ? String(stableKey) : slugify(market.question || market.title);
+}
+
+export function toFavoriteMarket(market) {
+  const key = favoriteKey(market);
+  if (!key) return null;
+  const title = market.question || market.title || key;
+
+  return {
+    id: market.id != null ? String(market.id) : undefined,
+    key,
+    title,
+    question: market.question || market.title || "",
+    categorySlug: market.categorySlug || market.category || market.slug || "",
+    yesBid: market.yesBid ?? null,
+    noBid: market.noBid ?? null,
+    expiresAtSec: market.expiresAtSec ?? null,
+    url: buildPredictMarketUrl(market),
+  };
+}
+
 export function summarizeMarkets(markets) {
   const totalHourly = markets.reduce((sum, market) => sum + Number(market.hourlyRate || 0), 0);
   const top10Hourly = [...markets]

@@ -1,0 +1,8 @@
+name = "predict-favorites"
+main = "worker/index.mjs"
+compatibility_date = "2026-05-19"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "FAVORITES"
+id = "0e28a446d5f1460489ca5a7a8400a133"

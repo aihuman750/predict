@@ -402,6 +402,11 @@ input {
   text-transform: uppercase;
 }
 
+.sync-pill {
+  border-color: rgba(251, 146, 60, 0.36);
+  color: #fb923c;
+}
+
 .controls {
   align-items: center;
   display: flex;
@@ -542,6 +547,40 @@ input {
 
 .row-index {
   font-size: 11px;
+}
+
+.favorite-cell {
+  text-align: center;
+}
+
+.favorite-btn {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-md);
+  color: var(--muted-2);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  height: 28px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  width: 28px;
+}
+
+.favorite-btn:hover {
+  background: var(--bg-2);
+  color: #facc15;
+}
+
+.favorite-btn.active {
+  color: #facc15;
+}
+
+.favorite-btn:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .market-name {

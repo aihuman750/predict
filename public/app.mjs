@@ -3,8 +3,10 @@ import {
   buildMarketTitle,
   buildPredictMarketUrl,
   competitionTier,
+  favoriteKey,
   filterAndSortMarkets,
   summarizeMarkets,
+  toFavoriteMarket,
 } from "./rewards-core.mjs";
 
 const tierColors = ["#22C55E", "#84CC16", "#EAB308", "#F97316", "#F87171", "#B91C1C"];
@@ -17,10 +19,14 @@ const expireOptions = [
   { hrs: 720, label: "1m" },
   { hrs: 2160, label: "3m" },
 ];
+const FAVORITES_API_BASE = window.PREDICT_FAVORITES_API || "https://predict-favorites.aihuman750.workers.dev";
 
 const state = {
   dense: localStorage.getItem("predict_alpha_dense") === "1",
   error: false,
+  favoriteError: false,
+  favoriteKeys: new Set(),
+  favoritePending: new Set(),
   loaded: false,
   markets: [],
   maxExpireHrs: readExpireSetting(),
@@ -135,12 +141,7 @@ function renderHeader() {
         <span class="pa-brand-name">predict <em>alpha</em></span>
       </div>
       <nav class="pa-nav">
-        <a class="pa-nav-item" href="#">概览</a>
         <a class="pa-nav-item active" href="#">积分市场</a>
-        <a class="pa-nav-item" href="#">交易历史</a>
-        <a class="pa-nav-item" href="#">积分历史</a>
-        <a class="pa-nav-item" href="#">充提记录</a>
-        <a class="pa-nav-item" href="#">更多</a>
       </nav>
       <div class="pa-header-right">
         <div class="pa-status"><span class="dot"></span><span>实时</span><span id="clock">--</span></div>
@@ -201,6 +202,7 @@ function renderPage() {
             <div class="table-title-wrap">
               <div class="pa-card-title">积分市场</div>
               <div class="pill mono">${rows.length} 行</div>
+              <div class="pill mono ${state.favoriteError ? "sync-pill" : ""}">${state.favoriteError ? "收藏同步离线" : `收藏 ${state.favoriteKeys.size}`}</div>
             </div>
             <div class="controls">
               <input class="inp" id="searchInput" type="search" placeholder="搜索市场..." value="${escapeHtml(state.query)}" />
@@ -228,6 +230,7 @@ function renderPage() {
             <table class="pa-table ${state.dense ? "dense" : ""}">
               <thead>
                 <tr>
+                  <th style="width:42px">收藏</th>
                   <th style="width:32px">#</th>
                   <th>市场</th>
                   <th class="num sortable" style="width:74px" data-sort="yesBid" title="YES 一边的最优买价（概率）">Yes ${sortArrow("yesBid")}</th>
@@ -268,26 +271,38 @@ function renderPage() {
 
 function renderRows(rows, duplicateCategories) {
   if (!state.loaded) {
-    return `<tr><td colspan="9" class="muted center-cell">加载积分市场中...</td></tr>`;
+    return `<tr><td colspan="10" class="muted center-cell">加载积分市场中...</td></tr>`;
   }
 
   if (state.error) {
-    return `<tr><td colspan="9" class="muted center-cell">无法连接到 alpha 后端。</td></tr>`;
+    return `<tr><td colspan="10" class="muted center-cell">无法连接到 alpha 后端。</td></tr>`;
   }
 
   if (!rows.length) {
-    return `<tr><td colspan="9" class="muted center-cell">当前筛选条件下没有市场。</td></tr>`;
+    return `<tr><td colspan="10" class="muted center-cell">当前筛选条件下没有市场。</td></tr>`;
   }
 
   return rows
     .map((market, index) => {
       const title = buildMarketTitle(market, duplicateCategories);
       const predictUrl = buildPredictMarketUrl(market);
+      const key = favoriteKey(market);
+      const isFavorite = key && state.favoriteKeys.has(key);
+      const isPending = key && state.favoritePending.has(key);
       const titleHtml = predictUrl
         ? `<a class="market-link" href="${escapeHtml(predictUrl)}" target="_blank" rel="noopener noreferrer" title="在 Predict 打开：${escapeHtml(title)}">${escapeHtml(title)} <span aria-hidden="true">↗</span></a>`
         : `<span title="${escapeHtml(title)}">${escapeHtml(title)}</span>`;
       return `
         <tr>
+          <td class="favorite-cell">
+            <button
+              class="favorite-btn ${isFavorite ? "active" : ""}"
+              data-favorite-key="${escapeHtml(key || "")}"
+              aria-pressed="${isFavorite ? "true" : "false"}"
+              title="${isFavorite ? "取消收藏" : "收藏市场"}"
+              ${!key || isPending ? "disabled" : ""}
+            >${isFavorite ? "★" : "☆"}</button>
+          </td>
           <td class="num muted row-index">${String(index + 1).padStart(2, "0")}</td>
           <td>
             <div class="market-name">${titleHtml}</div>
@@ -347,6 +362,10 @@ function bindEvents() {
       renderPage();
     });
   }
+
+  for (const button of document.querySelectorAll("[data-favorite-key]")) {
+    button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteKey));
+  }
 }
 
 function updateClock() {
@@ -380,6 +399,57 @@ function rewardsEndpoint() {
   return `${base}?ts=${Date.now()}`;
 }
 
+function favoritesEndpoint(path = "") {
+  return `${FAVORITES_API_BASE}${path}`;
+}
+
+function setFavoriteKeys(favorites) {
+  state.favoriteKeys = new Set((Array.isArray(favorites) ? favorites : []).map((item) => item.key).filter(Boolean));
+}
+
+async function loadFavorites() {
+  try {
+    const response = await fetch(favoritesEndpoint("/api/favorites"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    setFavoriteKeys(payload.favorites);
+    state.favoriteError = false;
+  } catch (error) {
+    console.error(error);
+    state.favoriteError = true;
+  } finally {
+    renderPage();
+  }
+}
+
+async function toggleFavorite(key) {
+  if (!key || state.favoritePending.has(key)) return;
+  const market = state.markets.find((item) => favoriteKey(item) === key);
+  if (!market) return;
+
+  const wasFavorite = state.favoriteKeys.has(key);
+  state.favoritePending.add(key);
+  renderPage();
+
+  try {
+    const response = await fetch(favoritesEndpoint(`/api/favorites${wasFavorite ? `/${encodeURIComponent(key)}` : ""}`), {
+      body: wasFavorite ? undefined : JSON.stringify({ market: toFavoriteMarket(market) }),
+      headers: wasFavorite ? undefined : { "content-type": "application/json" },
+      method: wasFavorite ? "DELETE" : "POST",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    setFavoriteKeys(payload.favorites);
+    state.favoriteError = false;
+  } catch (error) {
+    console.error(error);
+    state.favoriteError = true;
+  } finally {
+    state.favoritePending.delete(key);
+    renderPage();
+  }
+}
+
 async function loadRewards({ force = false } = {}) {
   state.loaded = false;
   if (force) state.error = false;
@@ -404,4 +474,5 @@ document.documentElement.dataset.theme = localStorage.getItem("predict_alpha_the
 setAccent(localStorage.getItem("predict_alpha_accent") || "violet");
 renderPage();
 loadRewards();
+loadFavorites();
 setInterval(updateClock, 1000);

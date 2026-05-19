@@ -5,8 +5,10 @@ import {
   buildMarketTitle,
   buildPredictMarketUrl,
   competitionTier,
+  favoriteKey,
   filterAndSortMarkets,
   summarizeMarkets,
+  toFavoriteMarket,
 } from "../public/rewards-core.mjs";
 
 const NOW = 1_000_000;
@@ -104,4 +106,34 @@ test("competitionTier uses six score bands", () => {
   assert.equal(competitionTier(500), 2);
   assert.equal(competitionTier(2_000), 3);
   assert.equal(competitionTier(100_000), 6);
+});
+
+test("favoriteKey prefers stable market identifiers", () => {
+  assert.equal(favoriteKey({ id: "42", categorySlug: "fallback" }), "42");
+  assert.equal(favoriteKey({ categorySlug: "nexus-fdv-above-50m" }), "nexus-fdv-above-50m");
+  assert.equal(favoriteKey({ title: "Will Nexus FDV be above $50M?" }), "will-nexus-fdv-be-above-50m");
+  assert.equal(favoriteKey({}), null);
+});
+
+test("toFavoriteMarket stores the fields needed for reports and links", () => {
+  const favorite = toFavoriteMarket({
+    id: "42",
+    question: "Will Nexus FDV be above $50M one day after launch?",
+    categorySlug: "nexus-fdv-above-50m",
+    yesBid: 0.42,
+    noBid: 0.57,
+    expiresAtSec: NOW + 3600,
+  });
+
+  assert.deepEqual(favorite, {
+    id: "42",
+    key: "42",
+    title: "Will Nexus FDV be above $50M one day after launch?",
+    question: "Will Nexus FDV be above $50M one day after launch?",
+    categorySlug: "nexus-fdv-above-50m",
+    yesBid: 0.42,
+    noBid: 0.57,
+    expiresAtSec: NOW + 3600,
+    url: "https://predict.fun/market/nexus-fdv-above-50m",
+  });
 });
