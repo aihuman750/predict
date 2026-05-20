@@ -22,8 +22,12 @@ Expected response:
 
 ## List Favorites
 
+Most API routes require the private site session cookie when `SITE_PASSWORD` is configured.
+
 ```bash
-curl --fail --silent https://predict-favorites.aihuman750.workers.dev/api/favorites
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/favorites
 ```
 
 Response shape:
@@ -48,12 +52,13 @@ Response shape:
 
 ## Add or Update a Favorite
 
-Browser writes are only accepted from allowed origins. Non-browser calls without an `Origin` header are accepted.
+Browser writes require a valid private site session.
 
 ```bash
 curl --fail --silent \
   --request POST \
   --header "content-type: application/json" \
+  --cookie 'pa_session=<redacted>' \
   --data '{
     "market": {
       "key": "32279",
@@ -81,6 +86,7 @@ The returned `favorites` array is the complete post-write list.
 ```bash
 curl --fail --silent \
   --request DELETE \
+  --cookie 'pa_session=<redacted>' \
   https://predict-favorites.aihuman750.workers.dev/api/favorites/32279
 ```
 
@@ -107,13 +113,14 @@ Response shape:
 }
 ```
 
-The web UI can also call this endpoint from an allowed browser origin.
+The web UI can also call this endpoint with a valid private site session.
 
 ## Error Responses
 
 | Status | Error | Meaning |
 | --- | --- | --- |
 | `400` | `invalid_market` | The request body did not contain a usable `market`. |
+| `401` | `auth_required` | A private site session cookie is required. |
 | `403` | `origin_not_allowed` | Browser origin or report token is not allowed. |
 | `404` | `not_found` | Route does not exist. |
 | `500` | `report_failed` | Report generation or Feishu delivery failed. |
@@ -138,7 +145,9 @@ Report matching uses the key first, then category, then normalized question text
 ### List Monitored Wallets
 
 ```bash
-curl --fail --silent https://predict-favorites.aihuman750.workers.dev/api/wallets
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/wallets
 ```
 
 Response:
@@ -157,6 +166,7 @@ Response:
 curl --fail --silent \
   --request POST \
   --header "content-type: application/json" \
+  --cookie 'pa_session=<redacted>' \
   --data '{"address":"0x742d35cc6634c0532925a3b844bc454e4438f44e"}' \
   https://predict-favorites.aihuman750.workers.dev/api/wallets
 ```
@@ -168,13 +178,16 @@ Addresses must be valid EVM `0x` addresses and are stored lowercase.
 ```bash
 curl --fail --silent \
   --request DELETE \
+  --cookie 'pa_session=<redacted>' \
   https://predict-favorites.aihuman750.workers.dev/api/wallets/0x742d35cc6634c0532925a3b844bc454e4438f44e
 ```
 
 ### Fetch Wallet Summary
 
 ```bash
-curl --fail --silent https://predict-favorites.aihuman750.workers.dev/api/wallets/summary
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/wallets/summary
 ```
 
 Response shape:
@@ -203,6 +216,47 @@ Response shape:
           "url": "https://predict.fun/market/will-hylo-launch-a-token-by"
         }
       ]
+    }
+  ]
+}
+```
+
+### Self-Wallet Open Orders
+
+The browser UI is the normal integration path because the wallet must sign the official Predict auth message with `personal_sign`.
+
+After signing, the Worker stores an encrypted Predict JWT in KV and exposes:
+
+```bash
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/wallets/me/orders
+```
+
+Response shape:
+
+```json
+{
+  "favoritesAdded": 1,
+  "hasToken": true,
+  "signer": "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+  "orders": [
+    {
+      "id": "order-1",
+      "hash": "0xhash",
+      "marketId": "456",
+      "title": "Will Nexus FDV be above $50M one day after launch?",
+      "outcome": "Yes",
+      "side": "买入",
+      "price": "0.5",
+      "quantity": "10",
+      "remainingQuantity": "8",
+      "amountFilled": "2",
+      "rewardEarningRate": "4.25",
+      "status": "OPEN",
+      "strategy": "LIMIT",
+      "expiration": "2026-10-01 08:00",
+      "url": "https://predict.fun/market/nexus-fdv-above-50m-one-day-after-launch"
     }
   ]
 }

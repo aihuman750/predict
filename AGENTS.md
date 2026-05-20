@@ -1,20 +1,21 @@
 # Project Notes for Agents
 
-This repository powers the Predict rewards monitor at https://aihuman750.github.io/predict/.
+This repository powers the private Predict rewards monitor at https://predict-favorites.aihuman750.workers.dev/.
 
 ## Current Architecture
 
 - Frontend is static HTML/CSS/ESM under `public/`.
 - Local development uses `server.mjs` to serve `public/` and proxy `/api/markets/rewards`.
-- Production rewards data is the static file `public/data/rewards.json`, refreshed by `.github/workflows/pages.yml`.
-- Favorites and reports are handled by the Cloudflare Worker in `worker/index.mjs`.
+- Production is served by the Cloudflare Worker in `worker/index.mjs` with a password gate and static assets binding.
+- Production rewards data is fetched by the Worker at `/data/rewards.json`.
+- Favorites and reports are handled by the Worker.
 - Wallet monitoring is handled by Worker wallet routes and shared helpers in `public/wallet-core.mjs`.
+- Self-wallet open orders are fetched through the Worker after Predict wallet signing stores an encrypted JWT in KV.
 - Shared market and report helpers live in `public/rewards-core.mjs` and `scripts/report-core.mjs`.
 
 ## Important URLs
 
-- Site: `https://aihuman750.github.io/predict/`
-- Worker: `https://predict-favorites.aihuman750.workers.dev`
+- Private site and Worker: `https://predict-favorites.aihuman750.workers.dev`
 - Predict market links: `https://predict.fun/market/<slug>`
 - PredAlpha rewards source: `https://api.predalpha.xyz/api/markets/rewards`
 
@@ -25,13 +26,21 @@ This repository powers the Predict rewards monitor at https://aihuman750.github.
 - `POST /api/favorites`
 - `DELETE /api/favorites/:key`
 - `POST /api/report/send`
+- `POST /api/site/login`
+- `POST /api/site/logout`
+- `GET /api/site/status`
+- `GET /api/predict-auth/status`
+- `GET /api/predict-auth/message`
+- `POST /api/predict-auth/token`
 - `GET /api/wallets`
 - `POST /api/wallets`
 - `DELETE /api/wallets/:address`
 - `GET /api/wallets/summary`
+- `GET /api/wallets/me/orders`
 
 Favorite data is stored in Cloudflare KV under `favorites:v1`. Report price snapshots are stored under `report:price-state:v1`.
 Monitored wallet addresses are stored under `wallets:v1`.
+The encrypted Predict JWT is stored under `predict:auth:v1`.
 
 ## Environment and Secrets
 
@@ -47,6 +56,7 @@ GitHub Secrets required for deployment and report sending:
 - `FEISHU_SECRET`
 - `PREDICT_API_KEY`
 - `REPORT_TOKEN`
+- `SITE_PASSWORD`
 
 Do not write actual secret values into code, docs, tests, or commit messages.
 
@@ -59,6 +69,7 @@ npm test
 node --check public/app.mjs
 node --check worker/index.mjs
 node --check scripts/report-core.mjs
+node --check public/wallet-core.mjs
 git diff --check
 ```
 

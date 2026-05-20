@@ -498,6 +498,14 @@ input {
   padding: 14px 16px;
 }
 
+.wallet-connect-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
 .wallet-input {
   flex: 1;
   min-width: 320px;
@@ -567,7 +575,22 @@ input {
   gap: 1px;
 }
 
+.wallet-order-list {
+  display: grid;
+  gap: 1px;
+  padding: 0 16px 4px;
+}
+
 .wallet-position {
+  align-items: center;
+  border-top: 1px solid var(--hairline);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px 0;
+}
+
+.wallet-order {
   align-items: center;
   border-top: 1px solid var(--hairline);
   display: grid;
@@ -579,6 +602,10 @@ input {
 .wallet-position:first-child {
   border-top: 0;
   padding-top: 0;
+}
+
+.wallet-order:first-child {
+  border-top: 0;
 }
 
 .wallet-position-main {
@@ -594,6 +621,10 @@ input {
   grid-template-columns: repeat(2, minmax(90px, auto));
   justify-content: end;
   white-space: nowrap;
+}
+
+.wallet-order-metrics {
+  grid-template-columns: repeat(4, minmax(86px, auto));
 }
 
 .orders-unavailable {
@@ -921,12 +952,14 @@ input {
     padding-left: 38px;
   }
 
-  .wallet-position {
+  .wallet-position,
+  .wallet-order {
     align-items: flex-start;
     grid-template-columns: 1fr;
   }
 
-  .wallet-position-metrics {
+  .wallet-position-metrics,
+  .wallet-order-metrics {
     justify-content: start;
   }
 
@@ -995,7 +1028,8 @@ input {
     width: 100%;
   }
 
-  .wallet-position-metrics {
+  .wallet-position-metrics,
+  .wallet-order-metrics {
     grid-template-columns: 1fr;
   }
 

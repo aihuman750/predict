@@ -6,8 +6,7 @@ As of 2026-05-20, the project is deployed and functional.
 
 Production:
 
-- Site: https://aihuman750.github.io/predict/
-- Worker: https://predict-favorites.aihuman750.workers.dev
+- Private site and Worker: https://predict-favorites.aihuman750.workers.dev
 
 Implemented:
 
@@ -22,18 +21,21 @@ Implemented:
 - Worker KV storage for favorites and price snapshots.
 - Wallet monitor page for Predict wallet positions.
 - Position markets from monitored wallets auto-merge into favorites.
+- Password-protected Worker-hosted site with a seven-day HttpOnly session cookie.
+- Wallet signing flow for OKX, Binance, MetaMask, and other EIP-1193 wallets.
+- Authenticated self-wallet OPEN orders, with order markets auto-merged into favorites.
 
 ## Important Commits
 
 - `d869fa0` - Add favorite list and manual report push.
 - `653e23c` - Use Node 22 for Worker deployment.
 - `91f46ce` - Add favorite markets and daily Feishu reports.
+- `325e351` - Add wallet monitor page.
 
 ## Verification Already Done
 
-- `npm test` passes with 16 tests.
-- GitHub Pages deployment passed after commit `d869fa0`.
-- Cloudflare Worker deployment passed after commit `d869fa0`.
+- `npm test` passes with the current test count in the latest verification run.
+- Cloudflare Worker deployment is the production deployment path.
 - Worker health check returned `{"ok":true}`.
 - Online search verification: typing `nexus` preserved focus and returned matching rows.
 - Online favorite verification: adding and removing a favorite preserved scroll position.
@@ -42,9 +44,8 @@ Implemented:
 ## Known Limitations
 
 - Event progress is based on Google News RSS token overlap over a 48 hour window. It does not monitor project Discord, X posts, or official blogs directly.
-- Browser-origin writes are restricted to origins listed in `ALLOWED_ORIGINS` in `worker/index.mjs`.
-- The static Pages rewards snapshot only updates when the Pages workflow runs successfully.
-- Wallet open orders are shown as unavailable because Predict's documented orders API requires authenticated user context and does not expose arbitrary-address open orders.
+- Arbitrary-address open orders remain unavailable because Predict's documented orders API requires authenticated user context. Self-wallet open orders are supported after wallet signing.
+- If the Predict JWT expires, reconnect and sign again from the wallet monitor page.
 
 ## Next Useful Improvements
 

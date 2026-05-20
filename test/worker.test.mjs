@@ -19,6 +19,21 @@ class MemoryKV {
 
 const env = () => ({ FAVORITES: new MemoryKV() });
 
+async function loginCookie(workerEnv, password = "correct-password") {
+  const response = await handleRequest(
+    new Request("https://worker.test/api/site/login", {
+      body: JSON.stringify({ password }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }),
+    workerEnv,
+  );
+  assert.equal(response.status, 200);
+  const setCookie = response.headers.get("set-cookie");
+  assert.match(setCookie, /pa_session=/);
+  return setCookie.split(";")[0];
+}
+
 test("favorites API lists, upserts, and deletes markets", async () => {
   const workerEnv = env();
   const origin = "https://aihuman750.github.io";
@@ -283,4 +298,240 @@ test("wallet summary fetches positions and auto-adds position markets to favorit
   const favorites = JSON.parse(await workerEnv.FAVORITES.get("favorites:v1"));
   assert.equal(favorites.length, 1);
   assert.equal(favorites[0].key, "32279");
+});
+
+test("private site login rejects invalid passwords and sets a seven day session cookie", async () => {
+  const workerEnv = {
+    ...env(),
+    SITE_PASSWORD: "correct-password",
+  };
+
+  const protectedResponse = await handleRequest(new Request("https://worker.test/api/favorites"), workerEnv);
+  assert.equal(protectedResponse.status, 401);
+  assert.deepEqual(await protectedResponse.json(), { error: "auth_required" });
+
+  const badLogin = await handleRequest(
+    new Request("https://worker.test/api/site/login", {
+      body: JSON.stringify({ password: "wrong-password" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }),
+    workerEnv,
+  );
+  assert.equal(badLogin.status, 401);
+
+  const login = await handleRequest(
+    new Request("https://worker.test/api/site/login", {
+      body: JSON.stringify({ password: "correct-password" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }),
+    workerEnv,
+  );
+  assert.equal(login.status, 200);
+  assert.deepEqual(await login.json(), { ok: true });
+  assert.match(login.headers.get("set-cookie"), /HttpOnly/);
+  assert.match(login.headers.get("set-cookie"), /Max-Age=604800/);
+
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const favorites = await handleRequest(
+    new Request("https://worker.test/api/favorites", {
+      headers: { cookie },
+    }),
+    workerEnv,
+  );
+  assert.equal(favorites.status, 200);
+  assert.deepEqual(await favorites.json(), { favorites: [] });
+});
+
+test("private authenticated same-origin writes are allowed", async () => {
+  const workerEnv = {
+    ...env(),
+    SITE_PASSWORD: "correct-password",
+  };
+  const cookie = await loginCookie(workerEnv);
+
+  const response = await handleRequest(
+    new Request("https://worker.test/api/favorites", {
+      body: JSON.stringify({ market: { key: "private", title: "Private market" } }),
+      headers: {
+        "content-type": "application/json",
+        cookie,
+        origin: "https://predict-favorites.aihuman750.workers.dev",
+      },
+      method: "POST",
+    }),
+    workerEnv,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    favorites: [{ key: "private", title: "Private market" }],
+  });
+});
+
+test("predict auth routes exchange a wallet signature for a stored JWT", async () => {
+  const workerEnv = {
+    ...env(),
+    PREDICT_API_KEY: "predict-test-key",
+    SITE_PASSWORD: "correct-password",
+  };
+  const cookie = await loginCookie(workerEnv);
+  const calls = [];
+
+  const messageResponse = await handleRequest(
+    new Request("https://worker.test/api/predict-auth/message", {
+      headers: { cookie },
+    }),
+    workerEnv,
+    {
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), headers: options.headers });
+        return Response.json({ success: true, data: { message: "Sign in to Predict" } });
+      },
+    },
+  );
+  assert.equal(messageResponse.status, 200);
+  assert.deepEqual(await messageResponse.json(), { message: "Sign in to Predict" });
+
+  const tokenResponse = await handleRequest(
+    new Request("https://worker.test/api/predict-auth/token", {
+      body: JSON.stringify({
+        message: "Sign in to Predict",
+        signature: "0xsig",
+        signer: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+      }),
+      headers: { "content-type": "application/json", cookie },
+      method: "POST",
+    }),
+    workerEnv,
+    {
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), body: JSON.parse(options.body), headers: options.headers });
+        return Response.json({ success: true, data: { token: "predict-jwt" } });
+      },
+    },
+  );
+  assert.equal(tokenResponse.status, 200);
+  assert.deepEqual(await tokenResponse.json(), {
+    hasToken: true,
+    signer: "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+  });
+
+  const storedWallets = JSON.parse(await workerEnv.FAVORITES.get("wallets:v1"));
+  assert.deepEqual(storedWallets, ["0x742d35cc6634c0532925a3b844bc454e4438f44e"]);
+  const storedToken = await workerEnv.FAVORITES.get("predict:auth:v1");
+  assert.ok(storedToken);
+  assert.equal(storedToken.includes("predict-jwt"), false);
+});
+
+test("authenticated self orders fetch open orders and auto-add their markets to favorites", async () => {
+  const workerEnv = {
+    ...env(),
+    PREDICT_API_KEY: "predict-test-key",
+    SITE_PASSWORD: "correct-password",
+  };
+  const cookie = await loginCookie(workerEnv);
+  const calls = [];
+
+  await handleRequest(
+    new Request("https://worker.test/api/predict-auth/token", {
+      body: JSON.stringify({
+        message: "Sign in to Predict",
+        signature: "0xsig",
+        signer: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+      }),
+      headers: { "content-type": "application/json", cookie },
+      method: "POST",
+    }),
+    workerEnv,
+    {
+      fetch: async () => Response.json({ success: true, data: { token: "predict-jwt" } }),
+    },
+  );
+
+  const response = await handleRequest(
+    new Request("https://worker.test/api/wallets/me/orders", {
+      headers: { cookie },
+    }),
+    workerEnv,
+    {
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), headers: options.headers });
+        if (String(url).includes("/v1/orders")) {
+          return Response.json({
+            success: true,
+            data: [
+              {
+                id: "order-1",
+                marketId: 456,
+                amount: "12",
+                amountFilled: "2",
+                order: {
+                  hash: "0xhash",
+                  tokenId: "1001",
+                  side: 0,
+                  makerAmount: "5000000000000000000",
+                  takerAmount: "10000000000000000000",
+                  expiration: "1790812800",
+                },
+                rewardEarningRate: 4.25,
+                status: "OPEN",
+                strategy: "LIMIT",
+              },
+            ],
+          });
+        }
+        if (String(url).includes("/v1/markets/456")) {
+          return Response.json({
+            success: true,
+            data: {
+              id: 456,
+              question: "Will Nexus FDV be above $50M one day after launch?",
+              categorySlug: "nexus-fdv-above-50m-one-day-after-launch",
+              outcomes: [
+                { name: "Yes", tokenId: "1001", indexSet: 1 },
+                { name: "No", tokenId: "1002", indexSet: 2 },
+              ],
+            },
+          });
+        }
+        throw new Error(`unexpected fetch ${url}`);
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    favoritesAdded: 1,
+    hasToken: true,
+    orders: [
+      {
+        id: "order-1",
+        hash: "0xhash",
+        marketId: "456",
+        title: "Will Nexus FDV be above $50M one day after launch?",
+        outcome: "Yes",
+        side: "买入",
+        price: "0.5",
+        quantity: "10",
+        remainingQuantity: "8",
+        amountFilled: "2",
+        rewardEarningRate: "4.25",
+        status: "OPEN",
+        strategy: "LIMIT",
+        expiration: "2026-10-01 08:00",
+        url: "https://predict.fun/market/nexus-fdv-above-50m-one-day-after-launch",
+      },
+    ],
+    signer: "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+  });
+
+  const ordersCall = calls.find((call) => call.url.includes("/v1/orders"));
+  assert.match(ordersCall.url, /status=OPEN/);
+  assert.equal(ordersCall.headers.authorization, "Bearer predict-jwt");
+
+  const favorites = JSON.parse(await workerEnv.FAVORITES.get("favorites:v1"));
+  assert.equal(favorites.length, 1);
+  assert.equal(favorites[0].key, "456");
 });

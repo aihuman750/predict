@@ -21,7 +21,8 @@ const expireOptions = [
   { hrs: 720, label: "1m" },
   { hrs: 2160, label: "3m" },
 ];
-const FAVORITES_API_BASE = window.PREDICT_FAVORITES_API || "https://predict-favorites.aihuman750.workers.dev";
+const WORKER_ORIGIN = "https://predict-favorites.aihuman750.workers.dev";
+const FAVORITES_API_BASE = window.PREDICT_FAVORITES_API || (window.location.origin === WORKER_ORIGIN ? "" : WORKER_ORIGIN);
 
 const views = new Set(["markets", "favorites", "wallets"]);
 const viewMeta = {
@@ -64,6 +65,11 @@ const state = {
   walletLoading: false,
   walletMessage: "",
   walletSummary: { favoritesAdded: 0, wallets: [] },
+  ownOrders: [],
+  ownOrdersAuth: { hasToken: false, signer: null },
+  ownOrdersError: "",
+  ownOrdersLoading: false,
+  ownOrdersMessage: "",
 };
 
 function readView() {
@@ -211,6 +217,7 @@ function restoreRenderState(renderState) {
 }
 
 function renderHeader() {
+  const walletLabel = state.ownOrdersAuth.signer ? shortAddress(state.ownOrdersAuth.signer) : "连接钱包";
   return `
     <header class="pa-header">
       <div class="pa-brand" aria-label="predict alpha">
@@ -236,7 +243,7 @@ function renderHeader() {
         </div>
         <button class="pa-iconbtn lang-btn" title="语言">中</button>
         <button class="pa-iconbtn" id="themeBtn" title="切换主题">◐</button>
-        <button class="btn btn-sm wallet-btn">未设置钱包</button>
+        <a class="btn btn-sm wallet-btn" href="#wallets">${escapeHtml(walletLabel)}</a>
       </div>
     </header>
   `;
@@ -446,8 +453,43 @@ function renderWalletPage() {
   const wallets = state.walletSummary.wallets || [];
   const status = state.walletError || state.walletMessage;
   const statusClass = state.walletError ? "wallet-status error" : "wallet-status";
+  const ownOrdersStatus = state.ownOrdersError || state.ownOrdersMessage;
+  const ownOrdersStatusClass = state.ownOrdersError ? "wallet-status error" : "wallet-status";
 
   return `
+    <section class="pa-card wallet-card">
+      <div class="pa-card-head wallet-head">
+        <div>
+          <div class="pa-card-title">我的钱包授权</div>
+          <div class="wallet-sub muted">选择浏览器钱包签署 Predict 登录消息，用于读取你自己的当前挂单。</div>
+        </div>
+        <button class="btn btn-sm" id="refreshOwnOrdersBtn" ${state.ownOrdersLoading || !state.ownOrdersAuth.hasToken ? "disabled" : ""}>${
+          state.ownOrdersLoading ? "刷新中..." : "刷新挂单"
+        }</button>
+      </div>
+      <div class="wallet-connect-row">
+        <button class="btn" data-wallet-connect="okx" ${state.ownOrdersLoading ? "disabled" : ""}>连接 OKX 钱包</button>
+        <button class="btn btn-secondary" data-wallet-connect="binance" ${state.ownOrdersLoading ? "disabled" : ""}>连接币安钱包</button>
+        <button class="btn btn-secondary" data-wallet-connect="injected" ${state.ownOrdersLoading ? "disabled" : ""}>MetaMask / 其他</button>
+        ${state.ownOrdersAuth.signer ? `<span class="wallet-status">已授权 ${escapeHtml(shortAddress(state.ownOrdersAuth.signer))}</span>` : ""}
+        ${ownOrdersStatus ? `<span class="${ownOrdersStatusClass}">${escapeHtml(ownOrdersStatus)}</span>` : ""}
+      </div>
+    </section>
+
+    <section class="pa-card wallet-card">
+      <div class="pa-card-head wallet-head">
+        <div>
+          <div class="pa-card-title">我的当前挂单</div>
+          <div class="wallet-sub muted">${state.ownOrdersAuth.hasToken ? `${state.ownOrders.length} 个 OPEN 挂单` : "连接并签名后显示你的 OPEN 挂单。"}</div>
+        </div>
+      </div>
+      ${
+        state.ownOrdersAuth.hasToken
+          ? renderOwnOrders()
+          : `<div class="favorite-empty muted">还没有 Predict 授权。点击上方钱包按钮并签名后，会在这里展示当前挂单。</div>`
+      }
+    </section>
+
     <section class="pa-card wallet-card">
       <div class="pa-card-head wallet-head">
         <div>
@@ -477,6 +519,43 @@ function renderWalletPage() {
           : `<div class="pa-card wallet-empty muted">还没有监控地址。添加地址后会在这里展示持仓和挂单状态。</div>`
       }
     </section>
+  `;
+}
+
+function renderOwnOrders() {
+  if (state.ownOrdersLoading) {
+    return `<div class="favorite-empty muted">正在读取当前挂单...</div>`;
+  }
+
+  if (!state.ownOrders.length) {
+    return `<div class="favorite-empty muted">当前没有 OPEN 挂单。</div>`;
+  }
+
+  return `<div class="wallet-order-list">${state.ownOrders.map(renderOwnOrder).join("")}</div>`;
+}
+
+function renderOwnOrder(order) {
+  const title = order.url
+    ? `<a class="market-link" href="${escapeHtml(order.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(order.title)} <span aria-hidden="true">↗</span></a>`
+    : escapeHtml(order.title);
+
+  return `
+    <div class="wallet-order">
+      <div class="wallet-position-main">
+        <div class="market-name">${title}</div>
+        <div class="market-meta">#${escapeHtml(order.marketId || "-")} · ${escapeHtml(order.id || order.hash || "-")}</div>
+      </div>
+      <div class="wallet-position-metrics wallet-order-metrics">
+        <span>${escapeHtml(order.side)} ${escapeHtml(order.outcome)}</span>
+        <span>价格 ${escapeHtml(order.price)}</span>
+        <span>数量 ${escapeHtml(order.quantity)}</span>
+        <span>剩余 ${escapeHtml(order.remainingQuantity)}</span>
+        <span>已成交 ${escapeHtml(order.amountFilled)}</span>
+        <span>状态 ${escapeHtml(order.status)}</span>
+        <span>积分速率 ${escapeHtml(order.rewardEarningRate)}</span>
+        <span>到期 ${escapeHtml(order.expiration)}</span>
+      </div>
+    </div>
   `;
 }
 
@@ -598,6 +677,7 @@ function bindEvents() {
     renderPage({ preserveFocus: true, preserveScroll: true });
   });
   document.querySelector("#refreshWalletsBtn")?.addEventListener("click", () => loadWalletSummary({ preserveScroll: true }));
+  document.querySelector("#refreshOwnOrdersBtn")?.addEventListener("click", () => loadOwnOrders({ preserveScroll: true }));
   document.querySelector("#sendReportBtn")?.addEventListener("click", sendLatestReport);
   document.querySelector("#themeBtn")?.addEventListener("click", toggleTheme);
 
@@ -645,6 +725,108 @@ function bindEvents() {
 
   for (const button of document.querySelectorAll("[data-wallet-remove]")) {
     button.addEventListener("click", () => removeWallet(button.dataset.walletRemove));
+  }
+
+  for (const button of document.querySelectorAll("[data-wallet-connect]")) {
+    button.addEventListener("click", () => connectPredictWallet(button.dataset.walletConnect));
+  }
+}
+
+function injectedProviders() {
+  const ethereum = window.ethereum;
+  const providers = Array.isArray(ethereum?.providers) ? ethereum.providers : ethereum ? [ethereum] : [];
+  return providers.filter(Boolean);
+}
+
+function firstProvider(match) {
+  return injectedProviders().find(match) || null;
+}
+
+function walletProvider(kind) {
+  if (kind === "okx") {
+    return window.okxwallet || firstProvider((provider) => provider.isOkxWallet || provider.isOKExWallet) || null;
+  }
+  if (kind === "binance") {
+    return window.BinanceChain || firstProvider((provider) => provider.isBinance || provider.isBinanceWallet) || null;
+  }
+  if (kind === "injected") {
+    return (
+      firstProvider((provider) => provider.isMetaMask && !provider.isOkxWallet && !provider.isOKExWallet) ||
+      window.ethereum ||
+      null
+    );
+  }
+  return null;
+}
+
+async function requestWalletAddress(provider) {
+  const accounts = await provider.request({ method: "eth_requestAccounts" });
+  return normalizeWalletAddress(accounts?.[0]);
+}
+
+async function signPredictMessage(provider, address, message) {
+  try {
+    return await provider.request({ method: "personal_sign", params: [message, address] });
+  } catch (firstError) {
+    try {
+      return await provider.request({ method: "personal_sign", params: [address, message] });
+    } catch {
+      throw firstError;
+    }
+  }
+}
+
+async function connectPredictWallet(kind) {
+  const provider = walletProvider(kind);
+  if (!provider?.request) {
+    state.ownOrdersError = kind === "okx"
+      ? "没有检测到 OKX 钱包"
+      : kind === "binance"
+        ? "没有检测到币安钱包"
+        : "没有检测到浏览器钱包";
+    state.ownOrdersMessage = "";
+    renderPage({ preserveScroll: true });
+    return;
+  }
+
+  state.ownOrdersLoading = true;
+  state.ownOrdersError = "";
+  state.ownOrdersMessage = "请在钱包中确认签名";
+  renderPage({ preserveScroll: true });
+
+  try {
+    const signer = await requestWalletAddress(provider);
+    if (!signer) throw new Error("invalid_wallet_address");
+
+    const messageResponse = await fetch(favoritesEndpoint("/api/predict-auth/message"), { cache: "no-store" });
+    if (!messageResponse.ok) throw new Error(`message_http_${messageResponse.status}`);
+    const { message } = await messageResponse.json();
+    if (!message) throw new Error("missing_predict_message");
+
+    const signature = await signPredictMessage(provider, signer, message);
+    if (!signature) throw new Error("missing_signature");
+
+    const tokenResponse = await fetch(favoritesEndpoint("/api/predict-auth/token"), {
+      body: JSON.stringify({ message, signature, signer }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    if (!tokenResponse.ok) throw new Error(`token_http_${tokenResponse.status}`);
+    const tokenPayload = await tokenResponse.json();
+    state.ownOrdersAuth = {
+      hasToken: Boolean(tokenPayload.hasToken),
+      signer: tokenPayload.signer || signer,
+    };
+    state.ownOrdersMessage = "授权已保存";
+    await loadOwnOrders({ preserveScroll: true, renderLoading: false });
+    await loadWalletSummary({ preserveScroll: true });
+  } catch (error) {
+    console.error(error);
+    state.ownOrdersError = "钱包授权失败，请确认签名内容来自 Predict";
+    state.ownOrdersMessage = "";
+  } finally {
+    state.ownOrdersLoading = false;
+    renderPage({ preserveScroll: true });
   }
 }
 
@@ -784,6 +966,55 @@ async function loadWalletSummary({ preserveScroll = false } = {}) {
   }
 }
 
+async function loadPredictAuthStatus({ render = true } = {}) {
+  try {
+    const response = await fetch(favoritesEndpoint("/api/predict-auth/status"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.ownOrdersAuth = {
+      hasToken: Boolean(payload.hasToken),
+      signer: payload.signer || null,
+    };
+  } catch (error) {
+    console.error(error);
+    state.ownOrdersError = "授权状态读取失败";
+  } finally {
+    if (render) renderPage();
+  }
+}
+
+async function loadOwnOrders({ preserveScroll = false, renderLoading = true } = {}) {
+  if (renderLoading) {
+    state.ownOrdersLoading = true;
+    state.ownOrdersError = "";
+    renderPage({ preserveScroll });
+  }
+
+  try {
+    const response = await fetch(favoritesEndpoint("/api/wallets/me/orders"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.ownOrdersAuth = {
+      hasToken: Boolean(payload.hasToken),
+      signer: payload.signer || state.ownOrdersAuth.signer || null,
+    };
+    state.ownOrders = Array.isArray(payload.orders) ? payload.orders : [];
+    state.ownOrdersMessage = payload.favoritesAdded > 0
+      ? `已自动收藏 ${payload.favoritesAdded} 个挂单市场`
+      : state.ownOrdersAuth.hasToken
+        ? ""
+        : "连接钱包后读取当前挂单";
+    state.ownOrdersError = "";
+    if (payload.favoritesAdded > 0) await loadFavorites({ render: false });
+  } catch (error) {
+    console.error(error);
+    state.ownOrdersError = "当前挂单读取失败，请重新授权后再试";
+  } finally {
+    if (renderLoading) state.ownOrdersLoading = false;
+    renderPage({ preserveScroll });
+  }
+}
+
 async function addWallet() {
   const address = normalizeWalletAddress(state.walletInput);
   if (!address) {
@@ -898,10 +1129,21 @@ setAccent(localStorage.getItem("predict_alpha_accent") || "violet");
 renderPage();
 loadRewards();
 loadFavorites();
-if (state.view === "wallets") loadWalletSummary();
+loadPredictAuthStatus({ render: false }).then(() => {
+  renderPage();
+  if (state.view === "wallets") {
+    loadWalletSummary();
+    if (state.ownOrdersAuth.hasToken) loadOwnOrders();
+  }
+});
 window.addEventListener("hashchange", () => {
   state.view = readView();
   renderPage({ preserveScroll: true });
-  if (state.view === "wallets") loadWalletSummary({ preserveScroll: true });
+  if (state.view === "wallets") {
+    loadPredictAuthStatus({ render: false }).then(() => {
+      loadWalletSummary({ preserveScroll: true });
+      if (state.ownOrdersAuth.hasToken) loadOwnOrders({ preserveScroll: true });
+    });
+  }
 });
 setInterval(updateClock, 1000);
