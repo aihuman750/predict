@@ -477,6 +477,129 @@ input {
   white-space: nowrap;
 }
 
+.wallet-card {
+  margin-bottom: 16px;
+}
+
+.wallet-head {
+  align-items: flex-start;
+}
+
+.wallet-sub {
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.wallet-form {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.wallet-input {
+  flex: 1;
+  min-width: 320px;
+}
+
+.wallet-status {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.wallet-status.error,
+.wallet-error {
+  color: #fb923c;
+}
+
+.wallet-list {
+  display: grid;
+  gap: 16px;
+}
+
+.wallet-empty {
+  padding: 20px;
+}
+
+.wallet-address-head {
+  align-items: center;
+}
+
+.wallet-address {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.wallet-remove {
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.wallet-error {
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  padding: 10px 16px;
+}
+
+.wallet-section {
+  border-top: 1px solid var(--hairline);
+  padding: 14px 16px;
+}
+
+.wallet-section:first-of-type {
+  border-top: 0;
+}
+
+.wallet-section-title {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.wallet-position-list {
+  display: grid;
+  gap: 1px;
+}
+
+.wallet-position {
+  align-items: center;
+  border-top: 1px solid var(--hairline);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 12px 0;
+}
+
+.wallet-position:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.wallet-position-main {
+  min-width: 0;
+}
+
+.wallet-position-metrics {
+  color: var(--ink-2);
+  display: grid;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(90px, auto));
+  justify-content: end;
+  white-space: nowrap;
+}
+
+.orders-unavailable {
+  background: var(--bg-2);
+}
+
 .controls {
   align-items: center;
   display: flex;
@@ -798,6 +921,15 @@ input {
     padding-left: 38px;
   }
 
+  .wallet-position {
+    align-items: flex-start;
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-position-metrics {
+    justify-content: start;
+  }
+
   .controls {
     justify-content: flex-start;
   }
@@ -856,6 +988,15 @@ input {
 
   .inp {
     width: min(100%, 360px);
+  }
+
+  .wallet-input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .wallet-position-metrics {
+    grid-template-columns: 1fr;
   }
 
   .pa-footer {

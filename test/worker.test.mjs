@@ -159,3 +159,128 @@ test("report API sends the latest favorites report to Feishu and stores a price 
   const snapshot = JSON.parse(await workerEnv.FAVORITES.get("report:price-state:v1"));
   assert.deepEqual(snapshot.markets.nexus, { yesBid: 0.42, noBid: 0.57 });
 });
+
+test("wallet API lists, adds, and deletes monitored addresses", async () => {
+  const workerEnv = env();
+  const origin = "https://aihuman750.github.io";
+  const address = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
+  const normalized = "0x742d35cc6634c0532925a3b844bc454e4438f44e";
+
+  const emptyResponse = await handleRequest(new Request("https://worker.test/api/wallets"), workerEnv);
+  assert.deepEqual(await emptyResponse.json(), { wallets: [] });
+
+  const addResponse = await handleRequest(
+    new Request("https://worker.test/api/wallets", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ address }),
+    }),
+    workerEnv,
+  );
+  assert.equal(addResponse.status, 200);
+  assert.deepEqual(await addResponse.json(), { wallets: [normalized] });
+
+  const duplicateResponse = await handleRequest(
+    new Request("https://worker.test/api/wallets", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ address: normalized }),
+    }),
+    workerEnv,
+  );
+  assert.deepEqual(await duplicateResponse.json(), { wallets: [normalized] });
+
+  const deleteResponse = await handleRequest(
+    new Request(`https://worker.test/api/wallets/${normalized}`, {
+      method: "DELETE",
+      headers: { origin },
+    }),
+    workerEnv,
+  );
+  assert.equal(deleteResponse.status, 200);
+  assert.deepEqual(await deleteResponse.json(), { wallets: [] });
+});
+
+test("wallet summary fetches positions and auto-adds position markets to favorites", async () => {
+  const workerEnv = {
+    ...env(),
+    PREDICT_API_KEY: "predict-test-key",
+  };
+  const origin = "https://aihuman750.github.io";
+  const address = "0x742d35cc6634c0532925a3b844bc454e4438f44e";
+  const predictCalls = [];
+
+  await handleRequest(
+    new Request("https://worker.test/api/wallets", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ address }),
+    }),
+    workerEnv,
+  );
+
+  const response = await handleRequest(
+    new Request("https://worker.test/api/wallets/summary", {
+      headers: { origin },
+    }),
+    workerEnv,
+    {
+      fetch: async (url, options) => {
+        predictCalls.push({ url: String(url), apiKey: options.headers["x-api-key"] });
+        return Response.json({
+          success: true,
+          data: [
+            {
+              id: "position-1",
+              market: {
+                id: 32279,
+                question: "Will Hylo launch a token by June 30, 2026?",
+                categorySlug: "will-hylo-launch-a-token-by",
+              },
+              outcome: { name: "Yes" },
+              amount: "10",
+              valueUsd: "1.25",
+              averageBuyPriceUsd: "0.12",
+              pnlUsd: "0.05",
+            },
+          ],
+        });
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    favoritesAdded: 1,
+    wallets: [
+      {
+        address,
+        error: null,
+        orders: {
+          available: false,
+          reason: "Predict public API does not expose arbitrary-address open orders.",
+        },
+        positions: [
+          {
+            id: "position-1",
+            marketId: "32279",
+            title: "Will Hylo launch a token by June 30, 2026?",
+            outcome: "Yes",
+            amount: "10",
+            valueUsd: "1.25",
+            averageBuyPriceUsd: "0.12",
+            pnlUsd: "0.05",
+            url: "https://predict.fun/market/will-hylo-launch-a-token-by",
+          },
+        ],
+      },
+    ],
+  });
+  assert.equal(predictCalls.length, 1);
+  assert.match(predictCalls[0].url, /https:\/\/api\.predict\.fun\/v1\/positions\/0x742d35/);
+  assert.equal(predictCalls[0].apiKey, "predict-test-key");
+
+  const favorites = JSON.parse(await workerEnv.FAVORITES.get("favorites:v1"));
+  assert.equal(favorites.length, 1);
+  assert.equal(favorites[0].key, "32279");
+});

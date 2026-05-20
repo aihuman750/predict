@@ -4,10 +4,18 @@ import {
   findCurrentMarket,
   snapshotMarkets,
 } from "../scripts/report-core.mjs";
+import {
+  mergeFavoriteMarkets,
+  normalizeWalletAddress,
+  positionToFavoriteMarket,
+  summarizePosition,
+} from "../public/wallet-core.mjs";
 
 const FAVORITES_KEY = "favorites:v1";
 const REPORT_STATE_KEY = "report:price-state:v1";
+const WALLETS_KEY = "wallets:v1";
 const REWARDS_URL = "https://api.predalpha.xyz/api/markets/rewards";
+const PREDICT_POSITIONS_URL = "https://api.predict.fun/v1/positions";
 const RECENT_PROGRESS_MS = 48 * 60 * 60 * 1000;
 const ALLOWED_ORIGINS = new Set([
   "https://aihuman750.github.io",
@@ -81,6 +89,21 @@ async function readFavorites(env) {
 
 async function writeFavorites(env, favorites) {
   await env.FAVORITES.put(FAVORITES_KEY, JSON.stringify(favorites));
+}
+
+async function readWallets(env) {
+  const raw = await env.FAVORITES.get(WALLETS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(normalizeWalletAddress).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+async function writeWallets(env, wallets) {
+  await env.FAVORITES.put(WALLETS_KEY, JSON.stringify(wallets));
 }
 
 async function readReportState(env) {
@@ -285,6 +308,79 @@ async function sendLatestReport(env, deps = {}) {
   };
 }
 
+async function fetchWalletPositions(address, env, fetcher) {
+  if (!env.PREDICT_API_KEY) throw new Error("predict_api_key_not_configured");
+
+  const positions = [];
+  let cursor = null;
+
+  for (let page = 0; page < 5; page += 1) {
+    const url = new URL(`${PREDICT_POSITIONS_URL}/${encodeURIComponent(address)}`);
+    url.searchParams.set("first", "100");
+    if (cursor) url.searchParams.set("after", cursor);
+
+    const response = await fetcher(url.toString(), {
+      headers: {
+        accept: "application/json",
+        "x-api-key": env.PREDICT_API_KEY,
+      },
+    });
+    if (!response.ok) throw new Error(`predict_positions_http_${response.status}`);
+    const payload = await response.json();
+    if (payload?.success === false) throw new Error("predict_positions_failed");
+
+    const rows = Array.isArray(payload) ? payload : payload?.data || [];
+    positions.push(...rows);
+
+    cursor = payload?.cursor || null;
+    if (!cursor || !rows.length) break;
+  }
+
+  return positions;
+}
+
+async function buildWalletSummary(env, deps = {}) {
+  const fetcher = deps.fetch || fetch;
+  const wallets = await readWallets(env);
+  const favorites = await readFavorites(env);
+  const candidateFavorites = [];
+  const summaries = [];
+
+  for (const address of wallets) {
+    try {
+      const positions = await fetchWalletPositions(address, env, fetcher);
+      candidateFavorites.push(...positions.map(positionToFavoriteMarket).filter(Boolean));
+      summaries.push({
+        address,
+        error: null,
+        orders: {
+          available: false,
+          reason: "Predict public API does not expose arbitrary-address open orders.",
+        },
+        positions: positions.map(summarizePosition),
+      });
+    } catch (error) {
+      summaries.push({
+        address,
+        error: error.message,
+        orders: {
+          available: false,
+          reason: "Predict public API does not expose arbitrary-address open orders.",
+        },
+        positions: [],
+      });
+    }
+  }
+
+  const nextFavorites = mergeFavoriteMarkets(favorites, candidateFavorites);
+  if (nextFavorites.length !== favorites.length) await writeFavorites(env, nextFavorites);
+
+  return {
+    favoritesAdded: nextFavorites.length - favorites.length,
+    wallets: summaries,
+  };
+}
+
 export async function handleRequest(request, env, deps = {}) {
   const origin = request.headers.get("origin");
   const url = new URL(request.url);
@@ -314,6 +410,32 @@ export async function handleRequest(request, env, deps = {}) {
     return json({ favorites: next }, {}, origin);
   }
 
+  if (url.pathname === "/api/wallets" && request.method === "GET") {
+    return json({ wallets: await readWallets(env) }, {}, origin);
+  }
+
+  if (url.pathname === "/api/wallets" && request.method === "POST") {
+    if (!writeAllowed(request)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+
+    const body = await request.json().catch(() => null);
+    const address = normalizeWalletAddress(body?.address);
+    if (!address) return json({ error: "invalid_wallet_address" }, { status: 400 }, origin);
+
+    const wallets = await readWallets(env);
+    const next = wallets.includes(address) ? wallets : [address, ...wallets];
+    await writeWallets(env, next);
+    return json({ wallets: next }, {}, origin);
+  }
+
+  if (url.pathname === "/api/wallets/summary" && request.method === "GET") {
+    try {
+      return json(await buildWalletSummary(env, deps), {}, origin);
+    } catch (error) {
+      console.error(error);
+      return json({ error: "wallet_summary_failed" }, { status: 500 }, origin);
+    }
+  }
+
   const deleteMatch = url.pathname.match(/^\/api\/favorites\/([^/]+)$/);
   if (deleteMatch && request.method === "DELETE") {
     if (!writeAllowed(request)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
@@ -323,6 +445,19 @@ export async function handleRequest(request, env, deps = {}) {
     const next = favorites.filter((item) => item.key !== key);
     await writeFavorites(env, next);
     return json({ favorites: next }, {}, origin);
+  }
+
+  const walletDeleteMatch = url.pathname.match(/^\/api\/wallets\/([^/]+)$/);
+  if (walletDeleteMatch && request.method === "DELETE") {
+    if (!writeAllowed(request)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+
+    const address = normalizeWalletAddress(decodeURIComponent(walletDeleteMatch[1]));
+    if (!address) return json({ error: "invalid_wallet_address" }, { status: 400 }, origin);
+
+    const wallets = await readWallets(env);
+    const next = wallets.filter((item) => item !== address);
+    await writeWallets(env, next);
+    return json({ wallets: next }, {}, origin);
   }
 
   if (url.pathname === "/api/report/send" && request.method === "POST") {

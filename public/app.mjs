@@ -9,6 +9,7 @@ import {
   summarizeMarkets,
   toFavoriteMarket,
 } from "./rewards-core.mjs";
+import { normalizeWalletAddress } from "./wallet-core.mjs";
 
 const tierColors = ["#22C55E", "#84CC16", "#EAB308", "#F97316", "#F87171", "#B91C1C"];
 const expireOptions = [
@@ -21,6 +22,25 @@ const expireOptions = [
   { hrs: 2160, label: "3m" },
 ];
 const FAVORITES_API_BASE = window.PREDICT_FAVORITES_API || "https://predict-favorites.aihuman750.workers.dev";
+
+const views = new Set(["markets", "favorites", "wallets"]);
+const viewMeta = {
+  markets: {
+    label: "积分市场",
+    subtitle: "按当前盘口做市得分排序的活跃积分市场。",
+    title: "积分市场",
+  },
+  favorites: {
+    label: "收藏列表",
+    subtitle: "集中查看已收藏市场，并手动推送最新收藏市场报告。",
+    title: "收藏列表",
+  },
+  wallets: {
+    label: "钱包监控",
+    subtitle: "监控 Predict 钱包持仓，并自动收藏持仓相关市场。",
+    title: "钱包监控",
+  },
+};
 
 const state = {
   dense: localStorage.getItem("predict_alpha_dense") === "1",
@@ -38,7 +58,18 @@ const state = {
   reportSending: false,
   sortDir: "desc",
   sortKey: "hourlyRate",
+  view: readView(),
+  walletError: "",
+  walletInput: "",
+  walletLoading: false,
+  walletMessage: "",
+  walletSummary: { favoritesAdded: 0, wallets: [] },
 };
+
+function readView() {
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  return views.has(hash) ? hash : "markets";
+}
 
 function readExpireSetting() {
   const value = localStorage.getItem("predict_alpha_max_expire_hrs");
@@ -187,7 +218,13 @@ function renderHeader() {
         <span class="pa-brand-name">predict <em>alpha</em></span>
       </div>
       <nav class="pa-nav">
-        <a class="pa-nav-item active" href="#">积分市场</a>
+        ${Object.entries(viewMeta)
+          .map(
+            ([view, meta]) => `
+              <a class="pa-nav-item ${state.view === view ? "active" : ""}" href="#${view}" data-view="${view}">${meta.label}</a>
+            `,
+          )
+          .join("")}
       </nav>
       <div class="pa-header-right">
         <div class="pa-status"><span class="dot"></span><span>实时</span><span id="clock">--</span></div>
@@ -205,13 +242,86 @@ function renderHeader() {
   `;
 }
 
+function renderMarketsPage(rows, duplicateCategories) {
+  const stats = summarizeMarkets(state.markets);
+  const top10Share =
+    state.loaded && stats.totalHourly > 0 ? `${(stats.top10Hourly / stats.totalHourly * 100).toFixed(0)}<span>%</span>` : "-";
+
+  return `
+    <section class="pa-card stat-card">
+      <div class="stat-row">
+        ${statHtml("积分市场数", state.loaded ? formatNumber(stats.activeCount) : "-", "当前处于积分窗口")}
+        ${statHtml("总 pts/小时", state.loaded ? formatNumber(stats.totalHourly) : "-", "")}
+        ${statHtml("低竞争市场", state.loaded ? formatNumber(stats.lowCompetition) : "-", "竞争程度 1-2 档", "accent")}
+        ${statHtml("Top-10 占比", top10Share, "占总 pts/h")}
+      </div>
+    </section>
+
+    <section class="pa-card table-card">
+      <div class="pa-card-head">
+        <div class="table-title-wrap">
+          <div class="pa-card-title">积分市场</div>
+          <div class="pill mono">${rows.length} 行</div>
+          <div class="pill mono ${state.favoriteError ? "sync-pill" : ""}">${state.favoriteError ? "收藏同步离线" : `收藏 ${state.favoriteKeys.size}`}</div>
+        </div>
+        <div class="controls">
+          <input class="inp" id="searchInput" type="search" placeholder="搜索市场..." value="${escapeHtml(state.query)}" />
+          <div class="filter-group" title="只保留奖励窗口在此时段内结束的市场">
+            <span>到期窗口</span>
+            <div class="seg">
+              ${expireOptions
+                .map(
+                  (option) => `
+                    <button class="seg-item ${state.maxExpireHrs === option.hrs ? "active" : ""}" data-expire="${option.hrs ?? "all"}">
+                      ${option.label}
+                    </button>
+                  `,
+                )
+                .join("")}
+            </div>
+          </div>
+          <div class="seg">
+            <button class="seg-item ${state.dense ? "" : "active"}" data-density="std">标准</button>
+            <button class="seg-item ${state.dense ? "active" : ""}" data-density="dense">紧凑</button>
+          </div>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="pa-table ${state.dense ? "dense" : ""}">
+          <thead>
+            <tr>
+              <th style="width:42px">收藏</th>
+              <th style="width:32px">#</th>
+              <th>市场</th>
+              <th class="num sortable" style="width:74px" data-sort="yesBid" title="YES 一边的最优买价（概率）">Yes ${sortArrow("yesBid")}</th>
+              <th class="num sortable" style="width:74px" data-sort="noBid" title="NO 一边的最优买价（概率）">No ${sortArrow("noBid")}</th>
+              <th class="num sortable" style="width:104px" data-sort="hourlyRate">积分/小时 ${sortArrow("hourlyRate")}</th>
+              <th class="num sortable" style="width:88px" data-sort="spreadThreshold" title="积分门槛：报价价差需 <= 此值（单位：美分）">最大价差 ${sortArrow("spreadThreshold")}</th>
+              <th class="num sortable" style="width:88px" data-sort="shareThreshold" title="积分门槛：每边最低报价股数">最小股数 ${sortArrow("shareThreshold")}</th>
+              <th class="sortable" style="width:132px" data-sort="expiresAtSec">到期时间 ${sortArrow("expiresAtSec")}</th>
+              <th class="num sortable" style="width:96px" data-sort="score" title="做市竞争程度指示灯(6 档)。绿 = 清淡;橙 = 一般;红 = 拥挤。">竞争程度 ${sortArrow("score")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderRows(rows, duplicateCategories)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="pa-card disclaimer">
+      <div class="pa-eyebrow">免责声明</div>
+      <p>积分分配具体计算公式官方未公布，本页面分配比例按照推测的数学模型进行计算，仅供参考。</p>
+    </section>
+  `;
+}
+
 function renderPage(options = {}) {
   const renderState = captureRenderState({
     preserveFocus: Boolean(options.preserveFocus),
     preserveScroll: Boolean(options.preserveScroll),
   });
   const app = document.querySelector("#app");
-  const stats = summarizeMarkets(state.markets);
   const duplicateCategories = buildDuplicateCategorySet(state.markets);
   const rows = filterAndSortMarkets(state.markets, {
     maxExpireHrs: state.maxExpireHrs,
@@ -219,9 +329,7 @@ function renderPage(options = {}) {
     sortDir: state.sortDir,
     sortKey: state.sortKey,
   });
-
-  const top10Share =
-    state.loaded && stats.totalHourly > 0 ? `${(stats.top10Hourly / stats.totalHourly * 100).toFixed(0)}<span>%</span>` : "-";
+  const meta = viewMeta[state.view] || viewMeta.markets;
 
   app.innerHTML = `
     ${renderHeader()}
@@ -232,79 +340,15 @@ function renderPage(options = {}) {
             <div class="pa-eyebrow">${
               state.loaded ? (state.error ? "模块 · Predict.fun 积分扫描器 · 离线" : "模块 · Predict.fun 积分扫描器 · 实时") : "模块 · Predict.fun 积分扫描器 · 加载中..."
             }</div>
-            <h1 class="pa-h1">积分市场</h1>
-            <div class="pa-sub">按当前盘口做市得分排序的活跃积分市场。</div>
+            <h1 class="pa-h1">${meta.title}</h1>
+            <div class="pa-sub">${meta.subtitle}</div>
           </div>
-          <button class="btn btn-sm" id="refreshBtn">刷新</button>
+          ${state.view === "markets" ? `<button class="btn btn-sm" id="refreshBtn">刷新</button>` : ""}
         </div>
 
-        <section class="pa-card stat-card">
-          <div class="stat-row">
-            ${statHtml("积分市场数", state.loaded ? formatNumber(stats.activeCount) : "-", "当前处于积分窗口")}
-            ${statHtml("总 pts/小时", state.loaded ? formatNumber(stats.totalHourly) : "-", "")}
-            ${statHtml("低竞争市场", state.loaded ? formatNumber(stats.lowCompetition) : "-", "竞争程度 1-2 档", "accent")}
-            ${statHtml("Top-10 占比", top10Share, "占总 pts/h")}
-          </div>
-        </section>
-
-        ${renderFavoritesSection()}
-
-        <section class="pa-card table-card">
-          <div class="pa-card-head">
-            <div class="table-title-wrap">
-              <div class="pa-card-title">积分市场</div>
-              <div class="pill mono">${rows.length} 行</div>
-              <div class="pill mono ${state.favoriteError ? "sync-pill" : ""}">${state.favoriteError ? "收藏同步离线" : `收藏 ${state.favoriteKeys.size}`}</div>
-            </div>
-            <div class="controls">
-              <input class="inp" id="searchInput" type="search" placeholder="搜索市场..." value="${escapeHtml(state.query)}" />
-              <div class="filter-group" title="只保留奖励窗口在此时段内结束的市场">
-                <span>到期窗口</span>
-                <div class="seg">
-                  ${expireOptions
-                    .map(
-                      (option) => `
-                        <button class="seg-item ${state.maxExpireHrs === option.hrs ? "active" : ""}" data-expire="${option.hrs ?? "all"}">
-                          ${option.label}
-                        </button>
-                      `,
-                    )
-                    .join("")}
-                </div>
-              </div>
-              <div class="seg">
-                <button class="seg-item ${state.dense ? "" : "active"}" data-density="std">标准</button>
-                <button class="seg-item ${state.dense ? "active" : ""}" data-density="dense">紧凑</button>
-              </div>
-            </div>
-          </div>
-          <div class="table-scroll">
-            <table class="pa-table ${state.dense ? "dense" : ""}">
-              <thead>
-                <tr>
-                  <th style="width:42px">收藏</th>
-                  <th style="width:32px">#</th>
-                  <th>市场</th>
-                  <th class="num sortable" style="width:74px" data-sort="yesBid" title="YES 一边的最优买价（概率）">Yes ${sortArrow("yesBid")}</th>
-                  <th class="num sortable" style="width:74px" data-sort="noBid" title="NO 一边的最优买价（概率）">No ${sortArrow("noBid")}</th>
-                  <th class="num sortable" style="width:104px" data-sort="hourlyRate">积分/小时 ${sortArrow("hourlyRate")}</th>
-                  <th class="num sortable" style="width:88px" data-sort="spreadThreshold" title="积分门槛：报价价差需 <= 此值（单位：美分）">最大价差 ${sortArrow("spreadThreshold")}</th>
-                  <th class="num sortable" style="width:88px" data-sort="shareThreshold" title="积分门槛：每边最低报价股数">最小股数 ${sortArrow("shareThreshold")}</th>
-                  <th class="sortable" style="width:132px" data-sort="expiresAtSec">到期时间 ${sortArrow("expiresAtSec")}</th>
-                  <th class="num sortable" style="width:96px" data-sort="score" title="做市竞争程度指示灯(6 档)。绿 = 清淡;橙 = 一般;红 = 拥挤。">竞争程度 ${sortArrow("score")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${renderRows(rows, duplicateCategories)}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section class="pa-card disclaimer">
-          <div class="pa-eyebrow">免责声明</div>
-          <p>积分分配具体计算公式官方未公布，本页面分配比例按照推测的数学模型进行计算，仅供参考。</p>
-        </section>
+        ${state.view === "markets" ? renderMarketsPage(rows, duplicateCategories) : ""}
+        ${state.view === "favorites" ? renderFavoritesSection() : ""}
+        ${state.view === "wallets" ? renderWalletPage() : ""}
       </div>
     </main>
     <footer class="pa-footer">
@@ -388,6 +432,104 @@ function renderFavoriteItem(favorite) {
   `;
 }
 
+function formatUsdText(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return escapeHtml(value ?? "-");
+  return `$${number.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
+}
+
+function shortAddress(address) {
+  return `${String(address).slice(0, 6)}...${String(address).slice(-4)}`;
+}
+
+function renderWalletPage() {
+  const wallets = state.walletSummary.wallets || [];
+  const status = state.walletError || state.walletMessage;
+  const statusClass = state.walletError ? "wallet-status error" : "wallet-status";
+
+  return `
+    <section class="pa-card wallet-card">
+      <div class="pa-card-head wallet-head">
+        <div>
+          <div class="pa-card-title">监控地址</div>
+          <div class="wallet-sub muted">添加 Predict 钱包地址后，会读取持仓并自动收藏相关市场。</div>
+        </div>
+        <button class="btn btn-sm" id="refreshWalletsBtn" ${state.walletLoading ? "disabled" : ""}>${state.walletLoading ? "刷新中..." : "刷新持仓"}</button>
+      </div>
+      <form class="wallet-form" id="walletForm">
+        <input
+          class="inp wallet-input"
+          id="walletInput"
+          type="text"
+          placeholder="输入 0x 钱包地址"
+          value="${escapeHtml(state.walletInput)}"
+          autocomplete="off"
+        />
+        <button class="btn" type="submit" ${state.walletLoading ? "disabled" : ""}>添加监控</button>
+        ${status ? `<span class="${statusClass}">${escapeHtml(status)}</span>` : ""}
+      </form>
+    </section>
+
+    <section class="wallet-list">
+      ${
+        wallets.length
+          ? wallets.map(renderWalletSummary).join("")
+          : `<div class="pa-card wallet-empty muted">还没有监控地址。添加地址后会在这里展示持仓和挂单状态。</div>`
+      }
+    </section>
+  `;
+}
+
+function renderWalletSummary(wallet) {
+  const positions = Array.isArray(wallet.positions) ? wallet.positions : [];
+
+  return `
+    <section class="pa-card wallet-address-card">
+      <div class="pa-card-head wallet-address-head">
+        <div>
+          <div class="wallet-address mono" title="${escapeHtml(wallet.address)}">${escapeHtml(shortAddress(wallet.address))}</div>
+          <div class="wallet-sub muted">${positions.length} 个持仓市场</div>
+        </div>
+        <button class="pa-iconbtn wallet-remove" data-wallet-remove="${escapeHtml(wallet.address)}" title="移除监控地址">×</button>
+      </div>
+      ${wallet.error ? `<div class="wallet-error">持仓读取失败：${escapeHtml(wallet.error)}</div>` : ""}
+      <div class="wallet-section">
+        <div class="wallet-section-title">持仓</div>
+        ${
+          positions.length
+            ? `<div class="wallet-position-list">${positions.map(renderWalletPosition).join("")}</div>`
+            : `<div class="favorite-empty muted">该地址暂无可显示持仓。</div>`
+        }
+      </div>
+      <div class="wallet-section orders-unavailable">
+        <div class="wallet-section-title">挂单</div>
+        <div class="muted">${escapeHtml(wallet.orders?.reason || "公开接口暂不支持按地址查询挂单。")}</div>
+      </div>
+    </section>
+  `;
+}
+
+function renderWalletPosition(position) {
+  const title = position.url
+    ? `<a class="market-link" href="${escapeHtml(position.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(position.title)} <span aria-hidden="true">↗</span></a>`
+    : escapeHtml(position.title);
+
+  return `
+    <div class="wallet-position">
+      <div class="wallet-position-main">
+        <div class="market-name">${title}</div>
+        <div class="market-meta">#${escapeHtml(position.marketId || "-")} · ${escapeHtml(position.outcome || "-")}</div>
+      </div>
+      <div class="wallet-position-metrics">
+        <span>数量 ${escapeHtml(position.amount)}</span>
+        <span>价值 ${formatUsdText(position.valueUsd)}</span>
+        <span>均价 ${formatUsdText(position.averageBuyPriceUsd)}</span>
+        <span>PnL ${formatUsdText(position.pnlUsd)}</span>
+      </div>
+    </div>
+  `;
+}
+
 function renderRows(rows, duplicateCategories) {
   if (!state.loaded) {
     return `<tr><td colspan="10" class="muted center-cell">加载积分市场中...</td></tr>`;
@@ -446,6 +588,16 @@ function bindEvents() {
     state.query = event.target.value;
     renderPage({ preserveFocus: true, preserveScroll: true });
   });
+  document.querySelector("#walletForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addWallet();
+  });
+  document.querySelector("#walletInput")?.addEventListener("input", (event) => {
+    state.walletInput = event.target.value;
+    state.walletError = "";
+    renderPage({ preserveFocus: true, preserveScroll: true });
+  });
+  document.querySelector("#refreshWalletsBtn")?.addEventListener("click", () => loadWalletSummary({ preserveScroll: true }));
   document.querySelector("#sendReportBtn")?.addEventListener("click", sendLatestReport);
   document.querySelector("#themeBtn")?.addEventListener("click", toggleTheme);
 
@@ -490,6 +642,10 @@ function bindEvents() {
   for (const button of document.querySelectorAll("[data-favorite-remove]")) {
     button.addEventListener("click", () => removeFavorite(button.dataset.favoriteRemove));
   }
+
+  for (const button of document.querySelectorAll("[data-wallet-remove]")) {
+    button.addEventListener("click", () => removeWallet(button.dataset.walletRemove));
+  }
 }
 
 function updateClock() {
@@ -532,7 +688,7 @@ function setFavorites(favorites) {
   state.favoriteKeys = new Set(state.favoriteMarkets.map((item) => item.key).filter(Boolean));
 }
 
-async function loadFavorites() {
+async function loadFavorites({ render = true } = {}) {
   try {
     const response = await fetch(favoritesEndpoint("/api/favorites"), { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -543,7 +699,7 @@ async function loadFavorites() {
     console.error(error);
     state.favoriteError = true;
   } finally {
-    renderPage();
+    if (render) renderPage();
   }
 }
 
@@ -598,6 +754,89 @@ async function removeFavorite(key) {
     state.favoriteError = true;
   } finally {
     state.favoritePending.delete(key);
+    renderPage({ preserveScroll: true });
+  }
+}
+
+async function loadWalletSummary({ preserveScroll = false } = {}) {
+  state.walletLoading = true;
+  state.walletError = "";
+  renderPage({ preserveScroll });
+
+  try {
+    const response = await fetch(favoritesEndpoint("/api/wallets/summary"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.walletSummary = {
+      favoritesAdded: Number(payload.favoritesAdded || 0),
+      wallets: Array.isArray(payload.wallets) ? payload.wallets : [],
+    };
+    state.walletMessage = state.walletSummary.favoritesAdded > 0
+      ? `已自动收藏 ${state.walletSummary.favoritesAdded} 个持仓市场`
+      : "";
+    await loadFavorites({ render: false });
+  } catch (error) {
+    console.error(error);
+    state.walletError = "钱包持仓读取失败";
+  } finally {
+    state.walletLoading = false;
+    renderPage({ preserveScroll });
+  }
+}
+
+async function addWallet() {
+  const address = normalizeWalletAddress(state.walletInput);
+  if (!address) {
+    state.walletError = "钱包地址格式不正确";
+    renderPage({ preserveFocus: true, preserveScroll: true });
+    return;
+  }
+
+  state.walletLoading = true;
+  state.walletError = "";
+  state.walletMessage = "";
+  renderPage({ preserveScroll: true });
+
+  try {
+    const response = await fetch(favoritesEndpoint("/api/wallets"), {
+      body: JSON.stringify({ address }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.walletInput = "";
+    state.walletMessage = "监控地址已添加";
+    await loadWalletSummary({ preserveScroll: true });
+  } catch (error) {
+    console.error(error);
+    state.walletError = "添加监控地址失败";
+  } finally {
+    state.walletLoading = false;
+    renderPage({ preserveScroll: true });
+  }
+}
+
+async function removeWallet(address) {
+  const normalized = normalizeWalletAddress(address);
+  if (!normalized) return;
+
+  state.walletLoading = true;
+  state.walletError = "";
+  state.walletMessage = "";
+  renderPage({ preserveScroll: true });
+
+  try {
+    const response = await fetch(favoritesEndpoint(`/api/wallets/${encodeURIComponent(normalized)}`), {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.walletMessage = "监控地址已移除";
+    await loadWalletSummary({ preserveScroll: true });
+  } catch (error) {
+    console.error(error);
+    state.walletError = "移除监控地址失败";
+  } finally {
+    state.walletLoading = false;
     renderPage({ preserveScroll: true });
   }
 }
@@ -659,4 +898,10 @@ setAccent(localStorage.getItem("predict_alpha_accent") || "violet");
 renderPage();
 loadRewards();
 loadFavorites();
+if (state.view === "wallets") loadWalletSummary();
+window.addEventListener("hashchange", () => {
+  state.view = readView();
+  renderPage({ preserveScroll: true });
+  if (state.view === "wallets") loadWalletSummary({ preserveScroll: true });
+});
 setInterval(updateClock, 1000);
