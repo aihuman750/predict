@@ -20,6 +20,7 @@ const PREDICT_AUTH_KEY = "predict:auth:v1";
 const REWARDS_URL = "https://api.predalpha.xyz/api/markets/rewards";
 const PREDICT_AUTH_MESSAGE_URL = "https://api.predict.fun/v1/auth/message";
 const PREDICT_AUTH_URL = "https://api.predict.fun/v1/auth";
+const PREDICT_ACCOUNT_URL = "https://api.predict.fun/v1/account";
 const PREDICT_MARKETS_URL = "https://api.predict.fun/v1/markets";
 const PREDICT_ORDERS_URL = "https://api.predict.fun/v1/orders";
 const PREDICT_POSITIONS_URL = "https://api.predict.fun/v1/positions";
@@ -576,6 +577,19 @@ async function exchangePredictJwt({ env, fetcher, message, signature, signer }) 
   return String(token);
 }
 
+async function fetchConnectedAccount(env, fetcher, token) {
+  if (!env.PREDICT_API_KEY) throw new Error("predict_api_key_not_configured");
+  const payload = await fetchJson(fetcher, PREDICT_ACCOUNT_URL, {
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${token}`,
+      "x-api-key": env.PREDICT_API_KEY,
+    },
+  });
+  if (payload?.success === false) throw new Error("predict_account_failed");
+  return payload?.data || payload;
+}
+
 async function fetchOwnOrders(env, fetcher, token) {
   if (!env.PREDICT_API_KEY) throw new Error("predict_api_key_not_configured");
 
@@ -629,6 +643,7 @@ async function buildOwnOrdersSummary(env, deps = {}) {
       favoritesAdded: 0,
       hasToken: false,
       orders: [],
+      accountAddress: auth?.accountAddress || null,
       signer: auth?.signer || null,
     };
   }
@@ -656,6 +671,7 @@ async function buildOwnOrdersSummary(env, deps = {}) {
 
   return {
     favoritesAdded: nextFavorites.length - favorites.length,
+    accountAddress: auth.accountAddress || null,
     hasToken: true,
     orders: orders.map((order) => summarizeOrder(order, markets.get(String(order?.marketId)))),
     signer: auth.signer || null,
@@ -790,7 +806,11 @@ export async function handleRequest(request, env, deps = {}) {
 
   if (url.pathname === "/api/predict-auth/status" && request.method === "GET") {
     const auth = await readPredictAuth(env);
-    return json({ hasToken: Boolean(auth?.token), signer: auth?.signer || null }, {}, origin);
+    return json({
+      accountAddress: auth?.accountAddress || null,
+      hasToken: Boolean(auth?.token),
+      signer: auth?.signer || null,
+    }, {}, origin);
   }
 
   if (url.pathname === "/api/predict-auth/message" && request.method === "GET") {
@@ -811,16 +831,25 @@ export async function handleRequest(request, env, deps = {}) {
 
     try {
       const token = await exchangePredictJwt({ env, fetcher, message, signature, signer });
+      const account = await fetchConnectedAccount(env, fetcher, token);
+      const accountAddress = normalizeWalletAddress(account?.address) || signer;
       await writePredictAuth(env, {
+        accountAddress,
         savedAt: new Date(nowMs(deps)).toISOString(),
         signer,
         token,
       });
 
       const wallets = await readWallets(env);
-      if (!wallets.includes(signer)) await writeWallets(env, [signer, ...wallets]);
+      const nextWallets = [
+        accountAddress,
+        ...wallets.filter((address) => address !== accountAddress && address !== signer),
+      ];
+      if (nextWallets.length !== wallets.length || nextWallets.some((address, index) => address !== wallets[index])) {
+        await writeWallets(env, nextWallets);
+      }
 
-      return json({ hasToken: true, signer }, {}, origin);
+      return json({ accountAddress, hasToken: true, signer }, {}, origin);
     } catch (error) {
       console.error(error);
       return json({ error: "predict_auth_failed" }, { status: 500 }, origin);

@@ -42,7 +42,7 @@ The wallet monitor page adds a self-wallet panel:
 - Ask the selected wallet to sign the message with `personal_sign`.
 - Send `signer`, `signature`, and `message` back to the Worker.
 - Store the returned Predict JWT server-side.
-- Auto-add the signer address to the monitored wallet list.
+- Fetch the connected Predict account and auto-add that account address to the monitored wallet list.
 - Refresh the authenticated open orders list.
 
 The current open orders table shows:

@@ -378,6 +378,9 @@ test("predict auth routes exchange a wallet signature for a stored JWT", async (
   };
   const cookie = await loginCookie(workerEnv);
   const calls = [];
+  const signer = "0x742d35cc6634c0532925a3b844bc454e4438f44e";
+  const accountAddress = "0x1111111111111111111111111111111111111111";
+  await workerEnv.FAVORITES.put("wallets:v1", JSON.stringify([signer]));
 
   const messageResponse = await handleRequest(
     new Request("https://worker.test/api/predict-auth/message", {
@@ -407,19 +410,27 @@ test("predict auth routes exchange a wallet signature for a stored JWT", async (
     workerEnv,
     {
       fetch: async (url, options) => {
-        calls.push({ url: String(url), body: JSON.parse(options.body), headers: options.headers });
+        calls.push({
+          url: String(url),
+          body: options.body ? JSON.parse(options.body) : null,
+          headers: options.headers,
+        });
+        if (String(url).includes("/v1/account")) {
+          return Response.json({ success: true, data: { address: accountAddress, name: "Predict Account" } });
+        }
         return Response.json({ success: true, data: { token: "predict-jwt" } });
       },
     },
   );
   assert.equal(tokenResponse.status, 200);
   assert.deepEqual(await tokenResponse.json(), {
+    accountAddress,
     hasToken: true,
-    signer: "0x742d35cc6634c0532925a3b844bc454e4438f44e",
+    signer,
   });
 
   const storedWallets = JSON.parse(await workerEnv.FAVORITES.get("wallets:v1"));
-  assert.deepEqual(storedWallets, ["0x742d35cc6634c0532925a3b844bc454e4438f44e"]);
+  assert.deepEqual(storedWallets, [accountAddress]);
   const storedToken = await workerEnv.FAVORITES.get("predict:auth:v1");
   assert.ok(storedToken);
   assert.equal(storedToken.includes("predict-jwt"), false);
@@ -433,6 +444,7 @@ test("authenticated self orders fetch open orders and auto-add their markets to 
   };
   const cookie = await loginCookie(workerEnv);
   const calls = [];
+  const accountAddress = "0x1111111111111111111111111111111111111111";
 
   await handleRequest(
     new Request("https://worker.test/api/predict-auth/token", {
@@ -446,7 +458,12 @@ test("authenticated self orders fetch open orders and auto-add their markets to 
     }),
     workerEnv,
     {
-      fetch: async () => Response.json({ success: true, data: { token: "predict-jwt" } }),
+      fetch: async (url) => {
+        if (String(url).includes("/v1/account")) {
+          return Response.json({ success: true, data: { address: accountAddress, name: "Predict Account" } });
+        }
+        return Response.json({ success: true, data: { token: "predict-jwt" } });
+      },
     },
   );
 
@@ -504,6 +521,7 @@ test("authenticated self orders fetch open orders and auto-add their markets to 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     favoritesAdded: 1,
+    accountAddress,
     hasToken: true,
     orders: [
       {

@@ -14,7 +14,7 @@ Production URLs:
 - Favorite list with latest Yes/No prices.
 - Wallet monitor page for Predict wallet positions.
 - Position markets from monitored wallets are automatically merged into favorites.
-- Wallet signing flow for the user's own Predict account, with authenticated open orders.
+- Wallet signing flow for the user's own Predict account, with authenticated open orders and automatic internal-wallet detection.
 - Open-order markets are automatically merged into favorites.
 - Manual "推送最新报告" button that sends the current favorite-market report to Feishu.
 - Daily favorite-market report at 10:00 Asia/Shanghai via GitHub Actions calling the Worker report endpoint.

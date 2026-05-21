@@ -149,7 +149,7 @@ Value shape:
 
 KV key: `predict:auth:v1`
 
-Value shape: encrypted JSON created by the Worker. The plaintext contains the signer address, the Predict JWT, and the save timestamp. The plaintext value must not be logged or committed.
+Value shape: encrypted JSON created by the Worker. The plaintext contains the login signer address, the connected Predict account address, the Predict JWT, and the save timestamp. The plaintext value must not be logged or committed.
 
 ## Report Generation
 
@@ -188,9 +188,12 @@ Self-wallet open-order flow:
 2. Browser fetches `GET /api/predict-auth/message`.
 3. Browser requests `personal_sign` for the official Predict login message.
 4. Browser posts signer, message, and signature to `POST /api/predict-auth/token`.
-5. Worker exchanges the signature for a Predict JWT and stores it encrypted in `predict:auth:v1`.
-6. `GET /api/wallets/me/orders` calls `GET https://api.predict.fun/v1/orders?status=OPEN` with the stored JWT.
-7. Worker fetches market metadata for each order, renders display rows, and auto-merges order markets into favorites.
+5. Worker exchanges the signature for a Predict JWT.
+6. Worker calls `GET https://api.predict.fun/v1/account` with the JWT and reads the connected Predict account address.
+7. Worker stores signer, Predict account address, and JWT encrypted in `predict:auth:v1`.
+8. Worker adds the Predict account address, not the login wallet address, to `wallets:v1` so positions are read from the internal wallet.
+9. `GET /api/wallets/me/orders` calls `GET https://api.predict.fun/v1/orders?status=OPEN` with the stored JWT.
+10. Worker fetches market metadata for each order, renders display rows, and auto-merges order markets into favorites.
 
 Arbitrary-address open orders are still not fetched. Predict's documented `GET /v1/orders` endpoint lists the authenticated user's own orders and requires JWT authentication.
 

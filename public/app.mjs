@@ -66,7 +66,7 @@ const state = {
   walletMessage: "",
   walletSummary: { favoritesAdded: 0, wallets: [] },
   ownOrders: [],
-  ownOrdersAuth: { hasToken: false, signer: null },
+  ownOrdersAuth: { accountAddress: null, hasToken: false, signer: null },
   ownOrdersError: "",
   ownOrdersLoading: false,
   ownOrdersMessage: "",
@@ -217,7 +217,9 @@ function restoreRenderState(renderState) {
 }
 
 function renderHeader() {
-  const walletLabel = state.ownOrdersAuth.signer ? shortAddress(state.ownOrdersAuth.signer) : "连接钱包";
+  const walletLabel = state.ownOrdersAuth.accountAddress || state.ownOrdersAuth.signer
+    ? shortAddress(state.ownOrdersAuth.accountAddress || state.ownOrdersAuth.signer)
+    : "连接钱包";
   return `
     <header class="pa-header">
       <div class="pa-brand" aria-label="predict alpha">
@@ -461,7 +463,7 @@ function renderWalletPage() {
       <div class="pa-card-head wallet-head">
         <div>
           <div class="pa-card-title">我的钱包授权</div>
-          <div class="wallet-sub muted">选择浏览器钱包签署 Predict 登录消息，用于读取你自己的当前挂单。</div>
+          <div class="wallet-sub muted">选择浏览器钱包签署 Predict 登录消息，会自动识别关联的 Predict 内部钱包。</div>
         </div>
         <button class="btn btn-sm" id="refreshOwnOrdersBtn" ${state.ownOrdersLoading || !state.ownOrdersAuth.hasToken ? "disabled" : ""}>${
           state.ownOrdersLoading ? "刷新中..." : "刷新挂单"
@@ -471,7 +473,7 @@ function renderWalletPage() {
         <button class="btn" data-wallet-connect="okx" ${state.ownOrdersLoading ? "disabled" : ""}>连接 OKX 钱包</button>
         <button class="btn btn-secondary" data-wallet-connect="binance" ${state.ownOrdersLoading ? "disabled" : ""}>连接币安钱包</button>
         <button class="btn btn-secondary" data-wallet-connect="injected" ${state.ownOrdersLoading ? "disabled" : ""}>MetaMask / 其他</button>
-        ${state.ownOrdersAuth.signer ? `<span class="wallet-status">已授权 ${escapeHtml(shortAddress(state.ownOrdersAuth.signer))}</span>` : ""}
+        ${renderAuthWalletStatus()}
         ${ownOrdersStatus ? `<span class="${ownOrdersStatusClass}">${escapeHtml(ownOrdersStatus)}</span>` : ""}
       </div>
     </section>
@@ -520,6 +522,14 @@ function renderWalletPage() {
       }
     </section>
   `;
+}
+
+function renderAuthWalletStatus() {
+  if (!state.ownOrdersAuth.signer && !state.ownOrdersAuth.accountAddress) return "";
+  const parts = [];
+  if (state.ownOrdersAuth.accountAddress) parts.push(`Predict ${shortAddress(state.ownOrdersAuth.accountAddress)}`);
+  if (state.ownOrdersAuth.signer) parts.push(`登录 ${shortAddress(state.ownOrdersAuth.signer)}`);
+  return `<span class="wallet-status">${escapeHtml(parts.join(" · "))}</span>`;
 }
 
 function renderOwnOrders() {
@@ -814,6 +824,7 @@ async function connectPredictWallet(kind) {
     if (!tokenResponse.ok) throw new Error(`token_http_${tokenResponse.status}`);
     const tokenPayload = await tokenResponse.json();
     state.ownOrdersAuth = {
+      accountAddress: tokenPayload.accountAddress || null,
       hasToken: Boolean(tokenPayload.hasToken),
       signer: tokenPayload.signer || signer,
     };
@@ -972,6 +983,7 @@ async function loadPredictAuthStatus({ render = true } = {}) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     state.ownOrdersAuth = {
+      accountAddress: payload.accountAddress || null,
       hasToken: Boolean(payload.hasToken),
       signer: payload.signer || null,
     };
@@ -995,6 +1007,7 @@ async function loadOwnOrders({ preserveScroll = false, renderLoading = true } = 
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
     state.ownOrdersAuth = {
+      accountAddress: payload.accountAddress || state.ownOrdersAuth.accountAddress || null,
       hasToken: Boolean(payload.hasToken),
       signer: payload.signer || state.ownOrdersAuth.signer || null,
     };
