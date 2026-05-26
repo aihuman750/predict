@@ -302,6 +302,8 @@ function renderMarketsPage(rows, duplicateCategories) {
               <th style="width:42px">收藏</th>
               <th style="width:32px">#</th>
               <th>市场</th>
+              <th class="num sortable" style="width:104px" data-sort="totalLiq" title="上游 totalLiq 字段：当前市场总额">总交易额 ${sortArrow("totalLiq")}</th>
+              <th class="num sortable" style="width:104px" data-sort="vol24" title="过去 24 小时交易额">24h交易额 ${sortArrow("vol24")}</th>
               <th class="num sortable" style="width:74px" data-sort="yesBid" title="YES 一边的最优买价（概率）">Yes ${sortArrow("yesBid")}</th>
               <th class="num sortable" style="width:74px" data-sort="noBid" title="NO 一边的最优买价（概率）">No ${sortArrow("noBid")}</th>
               <th class="num sortable" style="width:104px" data-sort="hourlyRate">积分/小时 ${sortArrow("hourlyRate")}</th>
@@ -621,15 +623,15 @@ function renderWalletPosition(position) {
 
 function renderRows(rows, duplicateCategories) {
   if (!state.loaded) {
-    return `<tr><td colspan="10" class="muted center-cell">加载积分市场中...</td></tr>`;
+    return `<tr><td colspan="12" class="muted center-cell">加载积分市场中...</td></tr>`;
   }
 
   if (state.error) {
-    return `<tr><td colspan="10" class="muted center-cell">无法连接到 alpha 后端。</td></tr>`;
+    return `<tr><td colspan="12" class="muted center-cell">无法连接到 alpha 后端。</td></tr>`;
   }
 
   if (!rows.length) {
-    return `<tr><td colspan="10" class="muted center-cell">当前筛选条件下没有市场。</td></tr>`;
+    return `<tr><td colspan="12" class="muted center-cell">当前筛选条件下没有市场。</td></tr>`;
   }
 
   return rows
@@ -658,6 +660,8 @@ function renderRows(rows, duplicateCategories) {
             <div class="market-name">${titleHtml}</div>
             <div class="market-meta">#${escapeHtml(market.id)} · ${hoursLeft(market).toFixed(1)}h 剩余</div>
           </td>
+          <td class="num mono text-xs">${market.totalLiq != null ? formatUsdText(market.totalLiq) : '<span class="muted">-</span>'}</td>
+          <td class="num mono text-xs">${market.vol24 != null ? formatUsdText(market.vol24) : '<span class="muted">-</span>'}</td>
           <td class="num">${market.yesBid != null ? formatCents(market.yesBid, 1) : '<span class="muted">-</span>'}</td>
           <td class="num">${market.noBid != null ? formatCents(market.noBid, 1) : '<span class="muted">-</span>'}</td>
           <td class="num">${formatNumber(market.hourlyRate)}</td>
