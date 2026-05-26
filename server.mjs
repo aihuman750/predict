@@ -7,6 +7,7 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const publicDir = join(root, "public");
 const port = Number(process.env.PORT || 5173);
 const upstream = "https://api.predalpha.xyz/api/markets/rewards";
+const predictApi = "https://api.predict.fun/v1";
 
 const mime = new Map([
   [".html", "text/html; charset=utf-8"],
@@ -61,6 +62,31 @@ async function proxyRewards(res) {
   }
 }
 
+async function proxyOrderbook(marketId, res) {
+  if (!process.env.PREDICT_API_KEY) {
+    send(res, 500, JSON.stringify({ error: "predict_api_key_not_configured" }), "application/json; charset=utf-8");
+    return;
+  }
+
+  try {
+    const upstreamRes = await fetch(`${predictApi}/markets/${encodeURIComponent(marketId)}/orderbook`, {
+      headers: {
+        accept: "application/json",
+        "x-api-key": process.env.PREDICT_API_KEY,
+      },
+    });
+    const body = await upstreamRes.text();
+    if (!upstreamRes.ok) {
+      send(res, upstreamRes.status, body || `Upstream HTTP ${upstreamRes.status}`);
+      return;
+    }
+    const payload = JSON.parse(body);
+    send(res, 200, JSON.stringify({ orderbook: payload?.data || payload }), "application/json; charset=utf-8");
+  } catch (error) {
+    send(res, 502, JSON.stringify({ error: error.message }), "application/json; charset=utf-8");
+  }
+}
+
 async function serveStatic(req, res) {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   let pathname = decodeURIComponent(url.pathname);
@@ -85,6 +111,12 @@ async function serveStatic(req, res) {
 createServer((req, res) => {
   if (req.url?.startsWith("/api/markets/rewards")) {
     proxyRewards(res);
+    return;
+  }
+
+  const orderbookMatch = req.url?.match(/^\/api\/markets\/([^/?]+)\/orderbook(?:[?].*)?$/);
+  if (orderbookMatch) {
+    proxyOrderbook(decodeURIComponent(orderbookMatch[1]), res);
     return;
   }
 

@@ -91,6 +91,7 @@ Routes:
 | `GET` | `/api/predict-auth/status` | Return whether a Predict JWT is stored, plus the login signer and Predict account address when known. |
 | `GET` | `/api/predict-auth/message` | Proxy the official Predict auth message. |
 | `POST` | `/api/predict-auth/token` | Exchange a wallet signature for a Predict JWT and store it encrypted in KV. |
+| `GET` | `/api/markets/:id/orderbook` | Proxy Predict market orderbook data for Activate Points depth calculations. |
 | `GET` | `/api/wallets` | Return monitored wallet addresses. |
 | `POST` | `/api/wallets` | Add one monitored wallet address. |
 | `DELETE` | `/api/wallets/:address` | Remove one monitored wallet address. |
@@ -169,6 +170,22 @@ The report has two sections:
 
 - Price changes: latest Yes/No and delta from the previous snapshot.
 - Event progress: matching news item or `无进展`.
+
+## Activate Points Orderbooks
+
+The rewards table hides the raw minimum-share threshold but still uses it for filtering. The frontend fetches each market's orderbook through `GET /api/markets/:id/orderbook`, which proxies `GET https://api.predict.fun/v1/markets/{id}/orderbook` with Worker secret `PREDICT_API_KEY`.
+
+Shared orderbook filtering logic lives in `public/orderbook-core.mjs`.
+
+For each market:
+
+1. Read `spreadThreshold`, `shareThreshold`, and `tick` from the PredAlpha rewards row.
+2. Read top-of-book `bids` and `asks` from Predict. These are Yes-side aggregated price levels in `[price, quantity]` format.
+3. Check whether `bestAsk - bestBid <= spreadThreshold`.
+4. Count the top five bids plus top five asks whose aggregated quantity meets `shareThreshold`.
+5. Render the count in the market table and expand the row to show active bid/ask levels.
+
+The count is an eligible aggregated price-level count, not a single-order count. Predict's public orderbook endpoint does not expose maker addresses, order hashes, or order age, so the UI cannot verify the five-minute active-order requirement.
 
 ## Wallet Monitoring
 

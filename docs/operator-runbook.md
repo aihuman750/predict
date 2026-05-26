@@ -130,6 +130,22 @@ This is expected for browsers without a valid session. Enter the private site pa
 3. Check `GET /api/wallets/summary` and inspect whether each wallet has an `error` field.
 4. Confirm the Predict API key still has access to `GET /v1/positions/{address}`.
 
+### Activate Points Orderbook Counts Fail
+
+1. Confirm the Worker has `PREDICT_API_KEY` set.
+2. Confirm the private site session is valid.
+3. Check one market orderbook response:
+
+```bash
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/markets/388797/orderbook
+```
+
+4. If the route returns 500, confirm the Predict API key still has access to `GET /v1/markets/{id}/orderbook`.
+5. If the route returns bids and asks but the table count is zero, inspect the rewards row's `spreadThreshold` and current best bid/ask. A spread outside the threshold intentionally produces zero active levels.
+6. Remember the UI counts eligible aggregated price levels. Predict does not expose order age through this endpoint, so the five-minute active-order condition cannot be verified client-side.
+
 ### My Open Orders Fail
 
 1. Confirm the Worker has `SITE_PASSWORD` and `PREDICT_API_KEY` set.

@@ -9,6 +9,7 @@ Production URLs:
 ## Features
 
 - Rewards market table sorted by points per hour, with search, expiry filters, density controls, quote prices, and competition tiers.
+- Activate Points orderbook counts and expandable bid/ask depth for each rewards market.
 - Direct market links to `https://predict.fun/market/<slug>`.
 - Favorite star on every market row.
 - Favorite list with latest Yes/No prices.
@@ -40,8 +41,9 @@ http://localhost:5173
 Optional environment variable:
 
 - `PREDALPHA_API_KEY`: forwarded by `server.mjs` as `x-api-key` when fetching `https://api.predalpha.xyz/api/markets/rewards`.
+- `PREDICT_API_KEY`: forwarded by `server.mjs` when proxying local orderbook requests to `https://api.predict.fun/v1/markets/{id}/orderbook`.
 
-The local server serves `public/` and proxies `/api/markets/rewards` to PredAlpha with a 15 second in-memory cache.
+The local server serves `public/`, proxies `/api/markets/rewards` to PredAlpha with a 15 second in-memory cache, and proxies `/api/markets/:id/orderbook` to Predict when `PREDICT_API_KEY` is set.
 
 ## Tests
 
@@ -49,7 +51,7 @@ The local server serves `public/` and proxies `/api/markets/rewards` to PredAlph
 npm test
 ```
 
-The test suite covers rewards-table helpers, wallet/order formatting, report markdown generation, Worker favorite APIs, private site login, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
+The test suite covers rewards-table helpers, Activate Points orderbook filtering, wallet/order formatting, report markdown generation, Worker favorite APIs, private site login, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
 
 ## Deployment
 

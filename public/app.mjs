@@ -9,6 +9,7 @@ import {
   summarizeMarkets,
   toFavoriteMarket,
 } from "./rewards-core.mjs";
+import { buildActivateOrderbook } from "./orderbook-core.mjs";
 import { normalizeWalletAddress } from "./wallet-core.mjs";
 
 const tierColors = ["#22C55E", "#84CC16", "#EAB308", "#F97316", "#F87171", "#B91C1C"];
@@ -53,6 +54,8 @@ const state = {
   loaded: false,
   markets: [],
   maxExpireHrs: readExpireSetting(),
+  expandedMarketId: null,
+  orderbooks: new Map(),
   query: "",
   reportError: false,
   reportMessage: "",
@@ -71,6 +74,11 @@ const state = {
   ownOrdersLoading: false,
   ownOrdersMessage: "",
 };
+
+const ORDERBOOK_PREFETCH_DELAY_MS = 325;
+let orderbookQueue = [];
+let orderbookQueueRunning = false;
+let orderbookQueueToken = 0;
 
 function readView() {
   const hash = window.location.hash.replace(/^#\/?/, "");
@@ -129,6 +137,14 @@ function formatCents(value, digits = 1) {
   return `${(number * 100).toFixed(digits).replace(/\.0$/, "")}<span class="muted">¢</span>`;
 }
 
+function formatQuantity(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return number.toLocaleString("en-US", {
+    maximumFractionDigits: 3,
+  });
+}
+
 function formatDate(sec) {
   if (!sec) return "-";
   const date = new Date(sec * 1000);
@@ -141,6 +157,20 @@ function hoursLeft(market) {
     return Math.max(0, (market.expiresAtSec - Math.floor(Date.now() / 1000)) / 3600);
   }
   return Number(market.remainHrs ?? 0);
+}
+
+function marketId(market) {
+  return market?.id != null ? String(market.id) : "";
+}
+
+function findMarketById(id) {
+  const value = String(id || "");
+  return state.markets.find((market) => marketId(market) === value) || null;
+}
+
+function orderbookEntry(market) {
+  const id = marketId(market);
+  return id ? state.orderbooks.get(id) || null : null;
 }
 
 function sortArrow(key) {
@@ -308,7 +338,7 @@ function renderMarketsPage(rows, duplicateCategories) {
               <th class="num sortable" style="width:74px" data-sort="noBid" title="NO 一边的最优买价（概率）">No ${sortArrow("noBid")}</th>
               <th class="num sortable" style="width:104px" data-sort="hourlyRate">积分/小时 ${sortArrow("hourlyRate")}</th>
               <th class="num sortable" style="width:88px" data-sort="spreadThreshold" title="积分门槛：报价价差需 <= 此值（单位：美分）">最大价差 ${sortArrow("spreadThreshold")}</th>
-              <th class="num sortable" style="width:88px" data-sort="shareThreshold" title="积分门槛：每边最低报价股数">最小股数 ${sortArrow("shareThreshold")}</th>
+              <th class="num" style="width:92px" title="当前 Activate Points 范围内的买盘/卖盘聚合档位数量">有效订单数</th>
               <th class="sortable" style="width:132px" data-sort="expiresAtSec">到期时间 ${sortArrow("expiresAtSec")}</th>
               <th class="num sortable" style="width:96px" data-sort="score" title="做市竞争程度指示灯(6 档)。绿 = 清淡;橙 = 一般;红 = 拥挤。">竞争程度 ${sortArrow("score")}</th>
             </tr>
@@ -375,6 +405,9 @@ function renderPage(options = {}) {
   bindEvents();
   updateClock();
   restoreRenderState(renderState);
+  if (state.view === "markets" && state.loaded && !state.error) {
+    queueOrderbookPrefetch(rows);
+  }
 }
 
 function favoriteView(favorite) {
@@ -621,6 +654,102 @@ function renderWalletPosition(position) {
   `;
 }
 
+function renderActiveOrderCount(market) {
+  const id = marketId(market);
+  if (!id) return '<span class="muted">-</span>';
+  const entry = state.orderbooks.get(id);
+  if (entry?.summary) return formatNumber(entry.summary.validOrderCount);
+  if (entry?.error) return '<span class="muted">-</span>';
+  return '<span class="muted">...</span>';
+}
+
+function renderOrderbookExpansion(market) {
+  const entry = orderbookEntry(market);
+  const summary = entry?.summary;
+
+  if (entry?.loading || !entry) {
+    return `<tr class="orderbook-row"><td colspan="12"><div class="orderbook-panel muted">加载 Activate Points 盘口中...</div></td></tr>`;
+  }
+
+  if (entry.error || !summary) {
+    return `<tr class="orderbook-row"><td colspan="12"><div class="orderbook-panel muted">盘口读取失败，请稍后重试。</div></td></tr>`;
+  }
+
+  const activeBids = summary.bids.filter((level) => level.active);
+  const activeAsks = summary.asks.filter((level) => level.active);
+  const spreadLabel = summary.spread != null ? formatCents(summary.spread, 1) : '<span class="muted">-</span>';
+  const limitLabel = summary.spreadThreshold != null ? formatCents(summary.spreadThreshold, 1) : '<span class="muted">-</span>';
+  const updatedAt = summary.updateTimestampMs
+    ? new Date(summary.updateTimestampMs).toLocaleTimeString("zh-CN", {
+        hour: "2-digit",
+        hour12: false,
+        minute: "2-digit",
+        second: "2-digit",
+        timeZone: "Asia/Shanghai",
+      })
+    : "-";
+
+  return `
+    <tr class="orderbook-row">
+      <td colspan="12">
+        <div class="orderbook-panel">
+          <div class="orderbook-head">
+            <span>Activate Points 盘口</span>
+            <span class="muted">有效订单数 ${formatNumber(summary.validOrderCount)} · Spread ${spreadLabel} / ${limitLabel} · 更新 ${escapeHtml(updatedAt)}</span>
+          </div>
+          <div class="orderbook-grid">
+            ${renderOrderbookSide("买盘", activeBids)}
+            ${renderOrderbookSide("卖盘", activeAsks)}
+          </div>
+          ${
+            summary.spreadEligible
+              ? ""
+              : `<div class="orderbook-note muted">当前买卖价差未进入 Activate Points 范围。</div>`
+          }
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+function renderOrderbookSide(label, levels) {
+  return `
+    <div class="orderbook-side">
+      <div class="orderbook-side-title">${label}</div>
+      ${
+        levels.length
+          ? `
+            <table class="orderbook-mini">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th class="num">Yes</th>
+                  <th class="num">No等价</th>
+                  <th class="num">数量</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${levels.map(renderOrderbookLevel).join("")}
+              </tbody>
+            </table>
+          `
+          : `<div class="orderbook-empty muted">暂无符合范围的档位</div>`
+      }
+    </div>
+  `;
+}
+
+function renderOrderbookLevel(level) {
+  return `
+    <tr>
+      <td class="mono muted">${level.rank}</td>
+      <td class="num">${formatCents(level.yesPrice, 1)}</td>
+      <td class="num">${formatCents(level.noPrice, 1)}</td>
+      <td class="num mono">${formatQuantity(level.quantity)}</td>
+    </tr>
+  `;
+}
+
 function renderRows(rows, duplicateCategories) {
   if (!state.loaded) {
     return `<tr><td colspan="12" class="muted center-cell">加载积分市场中...</td></tr>`;
@@ -641,11 +770,13 @@ function renderRows(rows, duplicateCategories) {
       const key = favoriteKey(market);
       const isFavorite = key && state.favoriteKeys.has(key);
       const isPending = key && state.favoritePending.has(key);
+      const id = marketId(market);
+      const isExpanded = id && state.expandedMarketId === id;
       const titleHtml = predictUrl
         ? `<a class="market-link" href="${escapeHtml(predictUrl)}" target="_blank" rel="noopener noreferrer" title="在 Predict 打开：${escapeHtml(title)}">${escapeHtml(title)} <span aria-hidden="true">↗</span></a>`
         : `<span title="${escapeHtml(title)}">${escapeHtml(title)}</span>`;
       return `
-        <tr>
+        <tr class="market-row ${isExpanded ? "expanded" : ""}" data-market-row="${escapeHtml(id)}" tabindex="0">
           <td class="favorite-cell">
             <button
               class="favorite-btn ${isFavorite ? "active" : ""}"
@@ -666,10 +797,11 @@ function renderRows(rows, duplicateCategories) {
           <td class="num">${market.noBid != null ? formatCents(market.noBid, 1) : '<span class="muted">-</span>'}</td>
           <td class="num">${formatNumber(market.hourlyRate)}</td>
           <td class="num mono text-xs">${market.spreadThreshold != null ? formatCents(market.spreadThreshold, 1) : '<span class="muted">-</span>'}</td>
-          <td class="num mono text-xs">${market.shareThreshold != null ? formatNumber(market.shareThreshold) : '<span class="muted">-</span>'}</td>
+          <td class="num mono text-xs">${renderActiveOrderCount(market)}</td>
           <td class="mono text-xs muted">${formatDate(market.expiresAtSec)}</td>
           <td class="num">${competitionBars(market.score)}</td>
         </tr>
+        ${isExpanded ? renderOrderbookExpansion(market) : ""}
       `;
     })
     .join("");
@@ -731,6 +863,18 @@ function bindEvents() {
 
   for (const button of document.querySelectorAll("[data-favorite-key]")) {
     button.addEventListener("click", () => toggleFavorite(button.dataset.favoriteKey));
+  }
+
+  for (const row of document.querySelectorAll("[data-market-row]")) {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a, button, input, select, textarea")) return;
+      toggleMarketExpansion(row.dataset.marketRow);
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleMarketExpansion(row.dataset.marketRow);
+    });
   }
 
   for (const button of document.querySelectorAll("[data-favorite-remove]")) {
@@ -878,6 +1022,96 @@ function rewardsEndpoint() {
 
 function favoritesEndpoint(path = "") {
   return `${FAVORITES_API_BASE}${path}`;
+}
+
+function orderbookEndpoint(id) {
+  const encoded = encodeURIComponent(id);
+  const isLocalHttp = ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+  return isLocalHttp ? `/api/markets/${encoded}/orderbook` : favoritesEndpoint(`/api/markets/${encoded}/orderbook`);
+}
+
+function resetOrderbookQueue() {
+  state.orderbooks.clear();
+  state.expandedMarketId = null;
+  orderbookQueue = [];
+  orderbookQueueToken += 1;
+}
+
+function queueOrderbookPrefetch(rows) {
+  const nextIds = [];
+  for (const market of rows) {
+    const id = marketId(market);
+    const entry = id ? state.orderbooks.get(id) : null;
+    if (!id || entry?.summary || entry?.loading || entry?.error) continue;
+    nextIds.push(id);
+  }
+  if (!nextIds.length) return;
+
+  orderbookQueue = [...new Set([...orderbookQueue, ...nextIds])];
+  if (!orderbookQueueRunning) runOrderbookQueue(orderbookQueueToken);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runOrderbookQueue(token) {
+  orderbookQueueRunning = true;
+  while (orderbookQueue.length && token === orderbookQueueToken) {
+    const id = orderbookQueue.shift();
+    const market = findMarketById(id);
+    if (market) await loadMarketOrderbook(market, { renderResult: true });
+    await delay(ORDERBOOK_PREFETCH_DELAY_MS);
+  }
+  orderbookQueueRunning = false;
+  if (orderbookQueue.length && token === orderbookQueueToken) runOrderbookQueue(token);
+}
+
+async function loadMarketOrderbook(market, { renderLoading = false, renderResult = renderLoading } = {}) {
+  const id = marketId(market);
+  if (!id) return null;
+
+  const current = state.orderbooks.get(id);
+  if (current?.summary) return current.summary;
+  if (current?.loading) return null;
+
+  state.orderbooks.set(id, { loading: true });
+  if (renderLoading) renderPage({ preserveScroll: true });
+
+  try {
+    const response = await fetch(orderbookEndpoint(id), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const orderbook = payload.orderbook || payload.data || payload;
+    const summary = buildActivateOrderbook({ market, orderbook });
+    state.orderbooks.set(id, {
+      fetchedAt: Date.now(),
+      orderbook,
+      summary,
+    });
+    return summary;
+  } catch (error) {
+    console.error(error);
+    state.orderbooks.set(id, { error: true });
+    return null;
+  } finally {
+    if (renderResult) renderPage({ preserveScroll: true });
+  }
+}
+
+function toggleMarketExpansion(id) {
+  const value = String(id || "");
+  if (!value) return;
+  if (state.expandedMarketId === value) {
+    state.expandedMarketId = null;
+    renderPage({ preserveScroll: true });
+    return;
+  }
+
+  state.expandedMarketId = value;
+  renderPage({ preserveScroll: true });
+  const market = findMarketById(value);
+  if (market) loadMarketOrderbook(market, { renderLoading: true, renderResult: true });
 }
 
 function setFavorites(favorites) {
@@ -1124,6 +1358,7 @@ async function sendLatestReport() {
 async function loadRewards({ force = false, preserveScroll = false } = {}) {
   state.loaded = false;
   if (force) state.error = false;
+  if (force) resetOrderbookQueue();
   renderPage({ preserveScroll });
 
   try {

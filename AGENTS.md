@@ -9,6 +9,7 @@ This repository powers the private Predict rewards monitor at https://predict-fa
 - Production is served by the Cloudflare Worker in `worker/index.mjs` with a password gate and static assets binding.
 - Production rewards data is fetched by the Worker at `/data/rewards.json`.
 - Favorites and reports are handled by the Worker.
+- Activate Points orderbook counts use Predict `/v1/markets/{id}/orderbook` through the Worker route `/api/markets/:id/orderbook`; frontend filtering helpers live in `public/orderbook-core.mjs`.
 - Wallet monitoring is handled by Worker wallet routes and shared helpers in `public/wallet-core.mjs`.
 - Self-wallet open orders are fetched through the Worker after Predict wallet signing stores an encrypted JWT in KV. The Worker calls Predict `/v1/account` after signing and stores the returned Predict account address when available.
 - Shared market and report helpers live in `public/rewards-core.mjs` and `scripts/report-core.mjs`.
@@ -32,6 +33,7 @@ This repository powers the private Predict rewards monitor at https://predict-fa
 - `GET /api/predict-auth/status`
 - `GET /api/predict-auth/message`
 - `POST /api/predict-auth/token`
+- `GET /api/markets/:id/orderbook`
 - `GET /api/wallets`
 - `POST /api/wallets`
 - `DELETE /api/wallets/:address`
@@ -47,6 +49,7 @@ The encrypted Predict JWT and Predict account metadata are stored under `predict
 Local optional:
 
 - `PREDALPHA_API_KEY`: forwarded by `server.mjs` when proxying rewards data.
+- `PREDICT_API_KEY`: forwarded by `server.mjs` when proxying local orderbook data.
 
 GitHub Secrets required for deployment and report sending:
 

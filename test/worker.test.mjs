@@ -216,6 +216,51 @@ test("wallet API lists, adds, and deletes monitored addresses", async () => {
   assert.deepEqual(await deleteResponse.json(), { wallets: [] });
 });
 
+test("market orderbook API proxies Predict orderbook data with the server-side API key", async () => {
+  const workerEnv = {
+    ...env(),
+    PREDICT_API_KEY: "predict-test-key",
+    SITE_PASSWORD: "correct-password",
+  };
+  const cookie = await loginCookie(workerEnv);
+  const calls = [];
+
+  const response = await handleRequest(
+    new Request("https://worker.test/api/markets/388797/orderbook", {
+      headers: { cookie },
+    }),
+    workerEnv,
+    {
+      fetch: async (url, options) => {
+        calls.push({ url: String(url), headers: options.headers });
+        return Response.json({
+          success: true,
+          data: {
+            asks: [[0.53, 150]],
+            bids: [[0.49, 120]],
+            marketId: 388797,
+            updateTimestampMs: 1_779_775_202_089,
+          },
+        });
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    orderbook: {
+      asks: [[0.53, 150]],
+      bids: [[0.49, 120]],
+      marketId: 388797,
+      updateTimestampMs: 1_779_775_202_089,
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.predict.fun/v1/markets/388797/orderbook");
+  assert.equal(calls[0].headers["x-api-key"], "predict-test-key");
+  assert.equal(calls[0].headers.authorization, undefined);
+});
+
 test("wallet summary fetches positions and auto-adds position markets to favorites", async () => {
   const workerEnv = {
     ...env(),

@@ -635,6 +635,18 @@ async function fetchPredictMarket(marketId, env, fetcher) {
   return payload?.data || payload;
 }
 
+async function fetchPredictOrderbook(marketId, env, fetcher) {
+  if (!env.PREDICT_API_KEY) throw new Error("predict_api_key_not_configured");
+  const payload = await fetchJson(fetcher, `${PREDICT_MARKETS_URL}/${encodeURIComponent(marketId)}/orderbook`, {
+    headers: {
+      accept: "application/json",
+      "x-api-key": env.PREDICT_API_KEY,
+    },
+  });
+  if (payload?.success === false) throw new Error("predict_orderbook_failed");
+  return payload?.data || payload;
+}
+
 async function buildOwnOrdersSummary(env, deps = {}) {
   const fetcher = deps.fetch || fetch;
   const auth = await readPredictAuth(env);
@@ -801,6 +813,16 @@ export async function handleRequest(request, env, deps = {}) {
     } catch (error) {
       console.error(error);
       return json({ error: "wallet_summary_failed" }, { status: 500 }, origin);
+    }
+  }
+
+  const orderbookMatch = url.pathname.match(/^\/api\/markets\/([^/]+)\/orderbook$/);
+  if (orderbookMatch && request.method === "GET") {
+    try {
+      return json({ orderbook: await fetchPredictOrderbook(decodeURIComponent(orderbookMatch[1]), env, fetcher) }, {}, origin);
+    } catch (error) {
+      console.error(error);
+      return json({ error: "predict_orderbook_failed" }, { status: 500 }, origin);
     }
   }
 

@@ -20,6 +20,13 @@ test("market table renders trade amount columns before Yes price", () => {
   assert.doesNotMatch(appSource, /colspan="10"/);
 });
 
+test("market table hides minimum shares and exposes Activate Points orderbook UI", () => {
+  assert.doesNotMatch(appSource, />最小股数/);
+  assert.match(appSource, />有效订单数/);
+  assert.match(appSource, /data-market-row=/);
+  assert.match(appSource, /renderOrderbookExpansion/);
+});
+
 test("index loads app script through a versioned URL", () => {
   assert.match(indexSource, /src="app\.mjs\?v=[0-9a-z.-]+"/);
 });
