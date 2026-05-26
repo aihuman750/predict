@@ -338,7 +338,7 @@ function renderMarketsPage(rows, duplicateCategories) {
               <th class="num sortable" style="width:74px" data-sort="noBid" title="NO 一边的最优买价（概率）">No ${sortArrow("noBid")}</th>
               <th class="num sortable" style="width:104px" data-sort="hourlyRate">积分/小时 ${sortArrow("hourlyRate")}</th>
               <th class="num sortable" style="width:88px" data-sort="spreadThreshold" title="积分门槛：报价价差需 <= 此值（单位：美分）">最大价差 ${sortArrow("spreadThreshold")}</th>
-              <th class="num" style="width:92px" title="当前 Activate Points 范围内的买盘/卖盘聚合档位数量">有效订单数</th>
+              <th class="num" style="width:104px" title="当前 Activate Points 范围内买盘和卖盘的数量合计">有效订单数</th>
               <th class="sortable" style="width:132px" data-sort="expiresAtSec">到期时间 ${sortArrow("expiresAtSec")}</th>
               <th class="num sortable" style="width:96px" data-sort="score" title="做市竞争程度指示灯(6 档)。绿 = 清淡;橙 = 一般;红 = 拥挤。">竞争程度 ${sortArrow("score")}</th>
             </tr>
@@ -658,7 +658,7 @@ function renderActiveOrderCount(market) {
   const id = marketId(market);
   if (!id) return '<span class="muted">-</span>';
   const entry = state.orderbooks.get(id);
-  if (entry?.summary) return formatNumber(entry.summary.validOrderCount);
+  if (entry?.summary) return formatQuantity(entry.summary.validOrderCount);
   if (entry?.error) return '<span class="muted">-</span>';
   return '<span class="muted">...</span>';
 }
@@ -695,7 +695,7 @@ function renderOrderbookExpansion(market) {
         <div class="orderbook-panel">
           <div class="orderbook-head">
             <span>Activate Points 盘口</span>
-            <span class="muted">有效订单数 ${formatNumber(summary.validOrderCount)} · Spread ${spreadLabel} / ${limitLabel} · 更新 ${escapeHtml(updatedAt)}</span>
+            <span class="muted">有效订单数 ${formatQuantity(summary.validOrderCount)} · Spread ${spreadLabel} / ${limitLabel} · 更新 ${escapeHtml(updatedAt)}</span>
           </div>
           <div class="orderbook-grid">
             ${renderOrderbookSide("买盘", activeBids)}
@@ -713,6 +713,9 @@ function renderOrderbookExpansion(market) {
 }
 
 function renderOrderbookSide(label, levels) {
+  const sideClass = label === "买盘" ? "bid" : "ask";
+  const maxQuantity = Math.max(0, ...levels.map((level) => Number(level.quantity) || 0));
+
   return `
     <div class="orderbook-side">
       <div class="orderbook-side-title">${label}</div>
@@ -722,14 +725,12 @@ function renderOrderbookSide(label, levels) {
             <table class="orderbook-mini">
               <thead>
                 <tr>
-                  <th>#</th>
                   <th class="num">Yes</th>
-                  <th class="num">No等价</th>
                   <th class="num">数量</th>
                 </tr>
               </thead>
               <tbody>
-                ${levels.map(renderOrderbookLevel).join("")}
+                ${levels.map((level) => renderOrderbookLevel(level, maxQuantity, sideClass)).join("")}
               </tbody>
             </table>
           `
@@ -739,13 +740,19 @@ function renderOrderbookSide(label, levels) {
   `;
 }
 
-function renderOrderbookLevel(level) {
+function renderOrderbookLevel(level, maxQuantity, sideClass) {
+  const quantity = Number(level.quantity);
+  const width = Number.isFinite(quantity) && maxQuantity > 0 ? Math.max(2, Math.min(100, quantity / maxQuantity * 100)) : 0;
+
   return `
     <tr>
-      <td class="mono muted">${level.rank}</td>
       <td class="num">${formatCents(level.yesPrice, 1)}</td>
-      <td class="num">${formatCents(level.noPrice, 1)}</td>
-      <td class="num mono">${formatQuantity(level.quantity)}</td>
+      <td class="num mono orderbook-qty">
+        <span class="orderbook-qty-track" aria-hidden="true">
+          <span class="orderbook-qty-bar ${sideClass}" style="width:${width.toFixed(1)}%"></span>
+        </span>
+        <span class="orderbook-qty-value">${formatQuantity(level.quantity)}</span>
+      </td>
     </tr>
   `;
 }

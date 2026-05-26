@@ -25,6 +25,9 @@ test("market table hides minimum shares and exposes Activate Points orderbook UI
   assert.match(appSource, />有效订单数/);
   assert.match(appSource, /data-market-row=/);
   assert.match(appSource, /renderOrderbookExpansion/);
+  assert.doesNotMatch(appSource, /<th>#<\/th>/);
+  assert.doesNotMatch(appSource, />No等价/);
+  assert.match(appSource, /orderbook-qty-bar/);
 });
 
 test("index loads app script through a versioned URL", () => {

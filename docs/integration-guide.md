@@ -163,7 +163,7 @@ Response shape:
 }
 ```
 
-`bids` and `asks` are Yes-side aggregated price levels. `public/orderbook-core.mjs` combines this data with the rewards row's `spreadThreshold`, `shareThreshold`, and `tick` to count and render Activate Points-eligible bid/ask levels. The endpoint does not expose individual order makers, hashes, or order age.
+`bids` and `asks` are Yes-side aggregated price levels. `public/orderbook-core.mjs` combines this data with the rewards row's `spreadThreshold`, `shareThreshold`, and `tick` to sum and render Activate Points-eligible bid/ask quantities. The endpoint does not expose individual order makers, hashes, or order age.
 
 ## Wallet Monitor
 

@@ -9,7 +9,7 @@ Production URLs:
 ## Features
 
 - Rewards market table sorted by points per hour, with search, expiry filters, density controls, quote prices, and competition tiers.
-- Activate Points orderbook counts and expandable bid/ask depth for each rewards market.
+- Activate Points orderbook quantity totals and expandable bid/ask depth for each rewards market.
 - Direct market links to `https://predict.fun/market/<slug>`.
 - Favorite star on every market row.
 - Favorite list with latest Yes/No prices.

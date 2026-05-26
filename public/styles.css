@@ -936,6 +936,40 @@ input {
   text-transform: uppercase;
 }
 
+.orderbook-qty {
+  min-width: 138px;
+  position: relative;
+}
+
+.orderbook-qty-track {
+  background: color-mix(in srgb, var(--hairline) 72%, transparent);
+  border-radius: 999px;
+  display: block;
+  height: 18px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.orderbook-qty-bar {
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+
+.orderbook-qty-bar.bid {
+  background: rgba(34, 197, 94, .45);
+}
+
+.orderbook-qty-bar.ask {
+  background: rgba(248, 113, 113, .48);
+}
+
+.orderbook-qty-value {
+  inset: 0 8px 0 auto;
+  line-height: 18px;
+  position: absolute;
+}
+
 .orderbook-empty {
   border: 1px dashed var(--hairline);
   border-radius: var(--r-md);

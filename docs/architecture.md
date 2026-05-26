@@ -182,10 +182,11 @@ For each market:
 1. Read `spreadThreshold`, `shareThreshold`, and `tick` from the PredAlpha rewards row.
 2. Read top-of-book `bids` and `asks` from Predict. These are Yes-side aggregated price levels in `[price, quantity]` format.
 3. Check whether `bestAsk - bestBid <= spreadThreshold`.
-4. Count the top five bids plus top five asks whose aggregated quantity meets `shareThreshold`.
-5. Render the count in the market table and expand the row to show active bid/ask levels.
+4. Keep the top five bids plus top five asks whose aggregated quantity meets `shareThreshold`.
+5. Sum those active bid/ask quantities and render the total in the market table.
+6. Expand the row to show active bid/ask Yes prices and quantities, with green bid bars and red ask bars scaled by quantity.
 
-The count is an eligible aggregated price-level count, not a single-order count. Predict's public orderbook endpoint does not expose maker addresses, order hashes, or order age, so the UI cannot verify the five-minute active-order requirement.
+The count is an eligible aggregated quantity total, not an individual-order count. Predict's public orderbook endpoint does not expose maker addresses, order hashes, or order age, so the UI cannot verify the five-minute active-order requirement.
 
 ## Wallet Monitoring
 

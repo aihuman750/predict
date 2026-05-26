@@ -143,8 +143,8 @@ curl --fail --silent \
 ```
 
 4. If the route returns 500, confirm the Predict API key still has access to `GET /v1/markets/{id}/orderbook`.
-5. If the route returns bids and asks but the table count is zero, inspect the rewards row's `spreadThreshold` and current best bid/ask. A spread outside the threshold intentionally produces zero active levels.
-6. Remember the UI counts eligible aggregated price levels. Predict does not expose order age through this endpoint, so the five-minute active-order condition cannot be verified client-side.
+5. If the route returns bids and asks but the table count is zero, inspect the rewards row's `spreadThreshold` and current best bid/ask. A spread outside the threshold intentionally produces zero active quantity.
+6. Remember the UI sums eligible aggregated bid/ask quantities. Predict does not expose order age through this endpoint, so the five-minute active-order condition cannot be verified client-side.
 
 ### My Open Orders Fail
 

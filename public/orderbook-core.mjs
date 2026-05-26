@@ -62,6 +62,7 @@ export function buildActivateOrderbook({ market = {}, orderbook = {} } = {}) {
   }
 
   const activeLevels = [...bids, ...asks].filter((level) => level.active);
+  const validOrderCount = Number(activeLevels.reduce((total, level) => total + level.quantity, 0).toFixed(6));
 
   return {
     activeLevels,
@@ -75,6 +76,6 @@ export function buildActivateOrderbook({ market = {}, orderbook = {} } = {}) {
     spreadEligible,
     spreadThreshold,
     updateTimestampMs: orderbook.updateTimestampMs ?? null,
-    validOrderCount: activeLevels.length,
+    validOrderCount,
   };
 }

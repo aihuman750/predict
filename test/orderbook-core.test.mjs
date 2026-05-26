@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { buildActivateOrderbook } from "../public/orderbook-core.mjs";
 
-test("buildActivateOrderbook counts top-five bid and ask levels that satisfy Activate Points rules", () => {
+test("buildActivateOrderbook sums quantities from top-five bid and ask levels that satisfy Activate Points rules", () => {
   const summary = buildActivateOrderbook({
     market: {
       id: "m1",
@@ -34,7 +34,7 @@ test("buildActivateOrderbook counts top-five bid and ask levels that satisfy Act
   });
 
   assert.equal(summary.spreadEligible, true);
-  assert.equal(summary.validOrderCount, 7);
+  assert.equal(summary.validOrderCount, 841);
   assert.deepEqual(summary.bids.map((level) => level.active).slice(0, 5), [true, false, true, true, true]);
   assert.deepEqual(summary.asks.map((level) => level.active).slice(0, 5), [true, false, true, true, false]);
   assert.equal(summary.bids[0].noPrice, 0.51);
