@@ -14,7 +14,7 @@ Production URLs:
 - Favorite list with latest Yes/No prices.
 - Wallet monitor page for Predict wallet positions.
 - Position markets from monitored wallets are automatically merged into favorites.
-- Wallet signing flow for the user's own Predict account, with authenticated open orders and automatic internal-wallet detection.
+- Wallet signing flow for the user's own Predict account, with authenticated open orders and Predict account-address detection through `/v1/account`.
 - Open-order markets are automatically merged into favorites.
 - Manual "推送最新报告" button that sends the current favorite-market report to Feishu.
 - Daily favorite-market report at 10:00 Asia/Shanghai via GitHub Actions calling the Worker report endpoint.
@@ -49,7 +49,7 @@ The local server serves `public/` and proxies `/api/markets/rewards` to PredAlph
 npm test
 ```
 
-The test suite covers rewards-table helpers, report markdown generation, Worker favorite APIs, and Worker report sending with mocked Feishu and rewards responses.
+The test suite covers rewards-table helpers, wallet/order formatting, report markdown generation, Worker favorite APIs, private site login, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
 
 ## Deployment
 

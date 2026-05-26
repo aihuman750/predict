@@ -1,5 +1,7 @@
 # Wallet Monitor Design
 
+Status note, 2026-05-26: this design describes the initial wallet-position monitor. It was later extended by the private Worker site and self-wallet order auth flow in `docs/superpowers/specs/2026-05-20-private-wallet-orders-design.md`; GitHub Pages is no longer the production host.
+
 ## Goal
 
 Split the app into three pages and add a stable wallet-monitor page that can track Predict wallet positions, while clearly marking arbitrary-address open orders as unavailable until Predict exposes a suitable public endpoint.
@@ -91,6 +93,6 @@ Add tests for:
 
 ## Non-Goals
 
-- No JWT order auth flow in this iteration.
+- No JWT order auth flow in the initial wallet-position iteration. Self-wallet auth was added later in the private Worker order-monitor work.
 - No private per-user storage. Existing project state is global/shared through Worker KV.
 - No automatic scheduled wallet refresh beyond summary calls from the wallet page.

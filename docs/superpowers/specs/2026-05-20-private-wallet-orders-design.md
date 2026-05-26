@@ -1,5 +1,7 @@
 # Private Wallet Orders Design
 
+Status note, 2026-05-26: this design is implemented. A follow-up fix made the Worker call `/v1/account` after Predict auth and store the returned Predict account address separately from the login signer.
+
 ## Goal
 
 Make the deployed Predict monitor private and add a self-wallet signing flow that can read the user's authenticated open Predict orders.
@@ -16,6 +18,7 @@ Make the deployed Predict monitor private and add a self-wallet signing flow tha
   - `POST https://api.predict.fun/v1/auth`
 - Wallet provider order in the UI is OKX Wallet, Binance Wallet, then MetaMask or another EIP-1193 browser wallet.
 - The Worker stores the resulting Predict JWT in KV under `predict:auth:v1`, encrypted with a key derived from `SITE_PASSWORD`.
+- After JWT exchange, the Worker calls `GET https://api.predict.fun/v1/account` and stores the returned Predict account address separately from the login signer.
 - The Worker uses the stored JWT to call `GET https://api.predict.fun/v1/orders?status=OPEN`.
 - Markets referenced by open orders are fetched from `GET https://api.predict.fun/v1/markets/{id}` and auto-merged into favorites without duplicates.
 

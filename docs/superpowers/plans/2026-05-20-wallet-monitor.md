@@ -1,5 +1,7 @@
 # Wallet Monitor Implementation Plan
 
+Status note, 2026-05-26: this plan was implemented in `325e351`. Production later moved from GitHub Pages to the private Cloudflare Worker site, so the deployment step mentioning GitHub Pages is historical context only.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Split the app into market, favorites, and wallet-monitor pages, then add server-side Predict position monitoring that auto-adds position markets to favorites.
@@ -60,5 +62,5 @@
 - [ ] Run `npm test`.
 - [ ] Run `node --check public/app.mjs && node --check worker/index.mjs && node --check scripts/report-core.mjs && git diff --check`.
 - [ ] Set GitHub Secret `PREDICT_API_KEY`.
-- [ ] Push and verify GitHub Pages and Worker deployments.
+- [ ] Push and verify GitHub Pages and Worker deployments. Historical note: production later moved fully to the private Worker site.
 - [ ] Verify online page navigation, wallet input behavior, and existing search/favorite behavior.

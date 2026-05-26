@@ -2,7 +2,7 @@
 
 ## Current State
 
-As of 2026-05-20, the project is deployed and functional.
+As of 2026-05-26, the project is deployed and functional.
 
 Production:
 
@@ -24,6 +24,7 @@ Implemented:
 - Password-protected Worker-hosted site with a seven-day HttpOnly session cookie.
 - Wallet signing flow for OKX, Binance, MetaMask, and other EIP-1193 wallets.
 - Authenticated self-wallet OPEN orders, with order markets auto-merged into favorites.
+- Predict account-address detection after wallet signing via `/v1/account`.
 
 ## Important Commits
 
@@ -31,10 +32,12 @@ Implemented:
 - `653e23c` - Use Node 22 for Worker deployment.
 - `91f46ce` - Add favorite markets and daily Feishu reports.
 - `325e351` - Add wallet monitor page.
+- `0e05baf` - Add private site login and self wallet orders.
+- `05512d0` - Use Predict account address for wallet monitoring.
 
 ## Verification Already Done
 
-- `npm test` passes with the current test count in the latest verification run.
+- `npm test` passes with 29 tests in the latest verification run.
 - Cloudflare Worker deployment is the production deployment path.
 - Worker health check returned `{"ok":true}`.
 - Online search verification: typing `nexus` preserved focus and returned matching rows.
@@ -45,6 +48,7 @@ Implemented:
 
 - Event progress is based on Google News RSS token overlap over a 48 hour window. It does not monitor project Discord, X posts, or official blogs directly.
 - Arbitrary-address open orders remain unavailable because Predict's documented orders API requires authenticated user context. Self-wallet open orders are supported after wallet signing.
+- If Predict returns the login wallet as `accountAddress` but the UI stores positions in a different internal wallet, manually add the internal wallet for position monitoring. Open-order monitoring still depends on the JWT's account context.
 - If the Predict JWT expires, reconnect and sign again from the wallet monitor page.
 
 ## Next Useful Improvements

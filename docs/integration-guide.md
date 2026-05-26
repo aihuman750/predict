@@ -142,6 +142,26 @@ Report matching uses the key first, then category, then normalized question text
 
 ## Wallet Monitor
 
+### Predict Auth Status
+
+```bash
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/predict-auth/status
+```
+
+Response shape:
+
+```json
+{
+  "accountAddress": "0x1111111111111111111111111111111111111111",
+  "hasToken": true,
+  "signer": "0x742d35cc6634c0532925a3b844bc454e4438f44e"
+}
+```
+
+`signer` is the browser wallet that signed the Predict login message. `accountAddress` is the Predict account address returned by `/v1/account` when the Worker exchanged the signature for a JWT.
+
 ### List Monitored Wallets
 
 ```bash

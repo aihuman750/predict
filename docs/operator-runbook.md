@@ -135,8 +135,26 @@ This is expected for browsers without a valid session. Enter the private site pa
 1. Confirm the Worker has `SITE_PASSWORD` and `PREDICT_API_KEY` set.
 2. Log in to the private site.
 3. Open the wallet monitor page and reconnect the wallet so the Predict auth message is signed again.
-4. Confirm the connected wallet is the Predict wallet whose orders should be monitored.
-5. If positions load but arbitrary-address orders do not, that is expected. Only the authenticated self-wallet orders endpoint is supported.
+4. Check auth status:
+
+```bash
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/predict-auth/status
+```
+
+5. Check the open-order response shape:
+
+```bash
+curl --fail --silent \
+  --cookie 'pa_session=<redacted>' \
+  https://predict-favorites.aihuman750.workers.dev/api/wallets/me/orders
+```
+
+6. If `hasToken` is false, reconnect and sign again.
+7. If `hasToken` is true but `orders` is empty, confirm there are active `OPEN` orders in Predict for the account represented by the JWT.
+8. If `accountAddress` equals the login `signer` while the Predict UI shows positions under a different internal wallet, manually add that internal wallet address to the monitor for positions. Current open-order monitoring still cannot read arbitrary internal-wallet orders without a JWT for that Predict account.
+9. If positions load but arbitrary-address orders do not, that is expected. Only the authenticated self-wallet orders endpoint is supported.
 
 ## Secret Hygiene
 

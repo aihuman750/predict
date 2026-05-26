@@ -88,7 +88,7 @@ Routes:
 | `POST` | `/api/favorites` | Upsert one favorite market. |
 | `DELETE` | `/api/favorites/:key` | Remove one favorite market. |
 | `POST` | `/api/report/send` | Build and send the current favorite-market report to Feishu. |
-| `GET` | `/api/predict-auth/status` | Return whether a Predict JWT is stored. |
+| `GET` | `/api/predict-auth/status` | Return whether a Predict JWT is stored, plus the login signer and Predict account address when known. |
 | `GET` | `/api/predict-auth/message` | Proxy the official Predict auth message. |
 | `POST` | `/api/predict-auth/token` | Exchange a wallet signature for a Predict JWT and store it encrypted in KV. |
 | `GET` | `/api/wallets` | Return monitored wallet addresses. |
@@ -196,6 +196,8 @@ Self-wallet open-order flow:
 10. Worker fetches market metadata for each order, renders display rows, and auto-merges order markets into favorites.
 
 Arbitrary-address open orders are still not fetched. Predict's documented `GET /v1/orders` endpoint lists the authenticated user's own orders and requires JWT authentication.
+
+Some Predict logins, especially third-party wallet logins that create a Predict-hosted internal wallet, may return the login wallet address from `/v1/account` instead of the internal wallet where positions live. In that case, position monitoring can still work by manually adding the internal wallet address to `wallets:v1`, but current open-order monitoring remains limited to the account represented by the stored Predict JWT.
 
 ## Deployment
 

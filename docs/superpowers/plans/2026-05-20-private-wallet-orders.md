@@ -1,5 +1,7 @@
 # Private Wallet Orders Implementation Plan
 
+Status note, 2026-05-26: this plan was implemented in `0e05baf`. A follow-up in `05512d0` added `/v1/account` lookup so the stored Predict account address is tracked separately from the login signer.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Move production access behind a Worker password gate and add wallet signing for authenticated self-wallet open order monitoring.

@@ -10,7 +10,7 @@ This repository powers the private Predict rewards monitor at https://predict-fa
 - Production rewards data is fetched by the Worker at `/data/rewards.json`.
 - Favorites and reports are handled by the Worker.
 - Wallet monitoring is handled by Worker wallet routes and shared helpers in `public/wallet-core.mjs`.
-- Self-wallet open orders are fetched through the Worker after Predict wallet signing stores an encrypted JWT in KV.
+- Self-wallet open orders are fetched through the Worker after Predict wallet signing stores an encrypted JWT in KV. The Worker calls Predict `/v1/account` after signing and stores the returned Predict account address when available.
 - Shared market and report helpers live in `public/rewards-core.mjs` and `scripts/report-core.mjs`.
 
 ## Important URLs
@@ -40,7 +40,7 @@ This repository powers the private Predict rewards monitor at https://predict-fa
 
 Favorite data is stored in Cloudflare KV under `favorites:v1`. Report price snapshots are stored under `report:price-state:v1`.
 Monitored wallet addresses are stored under `wallets:v1`.
-The encrypted Predict JWT is stored under `predict:auth:v1`.
+The encrypted Predict JWT and Predict account metadata are stored under `predict:auth:v1`.
 
 ## Environment and Secrets
 
