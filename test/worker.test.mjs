@@ -370,6 +370,32 @@ test("private authenticated same-origin writes are allowed", async () => {
   });
 });
 
+test("authenticated static assets are returned with no-store caching", async () => {
+  const workerEnv = {
+    ...env(),
+    ASSETS: {
+      fetch: async () =>
+        new Response("console.log('asset')", {
+          headers: { "cache-control": "public, max-age=31536000", "content-type": "text/javascript" },
+        }),
+    },
+    SITE_PASSWORD: "correct-password",
+  };
+  const cookie = await loginCookie(workerEnv);
+
+  const response = await handleRequest(
+    new Request("https://worker.test/app.mjs", {
+      headers: { cookie },
+    }),
+    workerEnv,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("content-type"), "text/javascript");
+  assert.equal(await response.text(), "console.log('asset')");
+});
+
 test("predict auth routes exchange a wallet signature for a stored JWT", async () => {
   const workerEnv = {
     ...env(),

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const appSource = await readFile(new URL("../public/app.mjs", import.meta.url), "utf8");
+const indexSource = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
 
 test("market table renders trade amount columns before Yes price", () => {
   const totalIndex = appSource.indexOf('data-sort="totalLiq"');
@@ -17,4 +18,8 @@ test("market table renders trade amount columns before Yes price", () => {
   assert.match(appSource, /market\.totalLiq/);
   assert.match(appSource, /market\.vol24/);
   assert.doesNotMatch(appSource, /colspan="10"/);
+});
+
+test("index loads app script through a versioned URL", () => {
+  assert.match(indexSource, /src="app\.mjs\?v=[0-9a-z.-]+"/);
 });

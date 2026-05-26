@@ -902,7 +902,16 @@ export async function handleRequest(request, env, deps = {}) {
 
   if (env.ASSETS && request.method === "GET") {
     if (!authenticated) return loginPage();
-    return env.ASSETS.fetch(request);
+    const assetResponse = await env.ASSETS.fetch(request);
+    const headers = new Headers(assetResponse.headers);
+    headers.set("cache-control", "no-store");
+    headers.set("pragma", "no-cache");
+    headers.set("expires", "0");
+    return new Response(assetResponse.body, {
+      headers,
+      status: assetResponse.status,
+      statusText: assetResponse.statusText,
+    });
   }
 
   return json({ error: "not_found" }, { status: 404 }, origin);
