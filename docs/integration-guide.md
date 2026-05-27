@@ -22,11 +22,10 @@ Expected response:
 
 ## List Favorites
 
-Most API routes require the private site session cookie when `SITE_PASSWORD` is configured.
+Production currently runs with `SITE_ACCESS_MODE = "public"`, so API reads do not require a site session cookie. If private mode is restored, include the `pa_session` cookie from `/api/site/login`.
 
 ```bash
 curl --fail --silent \
-  --cookie 'pa_session=<redacted>' \
   https://predict-favorites.aihuman750.workers.dev/api/favorites
 ```
 
@@ -52,13 +51,12 @@ Response shape:
 
 ## Add or Update a Favorite
 
-Browser writes require a valid private site session.
+Production public mode allows same-site browser writes and curl calls without a site cookie. Private mode requires a valid site session.
 
 ```bash
 curl --fail --silent \
   --request POST \
   --header "content-type: application/json" \
-  --cookie 'pa_session=<redacted>' \
   --data '{
     "market": {
       "key": "32279",
@@ -86,7 +84,6 @@ The returned `favorites` array is the complete post-write list.
 ```bash
 curl --fail --silent \
   --request DELETE \
-  --cookie 'pa_session=<redacted>' \
   https://predict-favorites.aihuman750.workers.dev/api/favorites/32279
 ```
 
@@ -113,14 +110,14 @@ Response shape:
 }
 ```
 
-The web UI can also call this endpoint with a valid private site session.
+The web UI can also call this endpoint from the public site. Private mode requires a valid site session.
 
 ## Error Responses
 
 | Status | Error | Meaning |
 | --- | --- | --- |
 | `400` | `invalid_market` | The request body did not contain a usable `market`. |
-| `401` | `auth_required` | A private site session cookie is required. |
+| `401` | `auth_required` | Private mode is active and a site session cookie is required. |
 | `403` | `origin_not_allowed` | Browser origin or report token is not allowed. |
 | `404` | `not_found` | Route does not exist. |
 | `500` | `report_failed` | Report generation or Feishu delivery failed. |

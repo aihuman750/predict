@@ -4,14 +4,14 @@
 
 Predict Rewards Monitor has three runtime surfaces:
 
-1. Private Cloudflare Worker site for frontend assets, API routes, favorites, wallet monitoring, and reports.
+1. Public Cloudflare Worker site for frontend assets, API routes, favorites, wallet monitoring, and reports.
 2. Local development server for proxying live rewards data.
 3. Predict APIs for positions, wallet auth, open orders, and market metadata.
 
 ```mermaid
 flowchart LR
   A["PredAlpha rewards API"] --> E["Cloudflare Worker"]
-  D["Private frontend assets"] --> E
+  D["Public frontend assets"] --> E
   E --> D
   E --> F["Cloudflare KV"]
   E --> G["Feishu bot webhook"]
@@ -33,7 +33,7 @@ Files:
 
 Production data path:
 
-- On the Worker site, `public/app.mjs` reads same-origin `data/rewards.json`, which the Worker proxies live from PredAlpha after login.
+- On the Worker site, `public/app.mjs` reads same-origin `data/rewards.json`, which the Worker proxies live from PredAlpha.
 - On `localhost`, `public/app.mjs` reads `/api/markets/rewards`.
 - On `file://`, it reads the PredAlpha API directly.
 
@@ -65,6 +65,9 @@ name = "predict-favorites"
 main = "worker/index.mjs"
 workers_dev = true
 
+[vars]
+SITE_ACCESS_MODE = "public"
+
 [assets]
 directory = "./public"
 binding = "ASSETS"
@@ -83,7 +86,7 @@ Routes:
 | `GET` | `/health` | Health check. |
 | `POST` | `/api/site/login` | Validate `SITE_PASSWORD` and issue a seven-day signed HttpOnly cookie. |
 | `POST` | `/api/site/logout` | Clear the site session cookie. |
-| `GET` | `/api/site/status` | Return whether the current request has a valid site session. |
+| `GET` | `/api/site/status` | Return whether the site is public and whether the current request is authenticated. |
 | `GET` | `/api/favorites` | Return all favorite markets. |
 | `POST` | `/api/favorites` | Upsert one favorite market. |
 | `DELETE` | `/api/favorites/:key` | Remove one favorite market. |
@@ -98,7 +101,7 @@ Routes:
 | `GET` | `/api/wallets/summary` | Fetch monitored wallet positions and auto-merge position markets into favorites. |
 | `GET` | `/api/wallets/me/orders` | Fetch authenticated self-wallet open orders and auto-merge their markets into favorites. |
 
-When `SITE_PASSWORD` is configured, all API routes except `/health`, `/api/site/login`, `/api/site/logout`, `/api/site/status`, and token-authorized `/api/report/send` require a valid site session cookie. Static assets are also served by the Worker only after this check.
+Production sets `SITE_ACCESS_MODE = "public"`, so static assets and normal site APIs do not require a password session. Browser write routes still enforce allowed origins. If `SITE_ACCESS_MODE` is removed or set to any other value, all API routes except `/health`, `/api/site/login`, `/api/site/logout`, `/api/site/status`, and token-authorized `/api/report/send` require a valid site session cookie, and static assets are served only after this check.
 
 ## Data Model
 

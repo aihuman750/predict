@@ -1,12 +1,12 @@
 # Project Notes for Agents
 
-This repository powers the private Predict rewards monitor at https://predict-favorites.aihuman750.workers.dev/.
+This repository powers the Predict rewards monitor at https://predict-favorites.aihuman750.workers.dev/.
 
 ## Current Architecture
 
 - Frontend is static HTML/CSS/ESM under `public/`.
 - Local development uses `server.mjs` to serve `public/` and proxy `/api/markets/rewards`.
-- Production is served by the Cloudflare Worker in `worker/index.mjs` with a password gate and static assets binding.
+- Production is served by the Cloudflare Worker in `worker/index.mjs` with public access enabled by `SITE_ACCESS_MODE = "public"` and static assets binding.
 - Production rewards data is fetched by the Worker at `/data/rewards.json`.
 - Favorites and reports are handled by the Worker.
 - Activate Points orderbook quantity totals use Predict `/v1/markets/{id}/orderbook` through the Worker route `/api/markets/:id/orderbook`; frontend filtering helpers live in `public/orderbook-core.mjs`.
@@ -16,7 +16,7 @@ This repository powers the private Predict rewards monitor at https://predict-fa
 
 ## Important URLs
 
-- Private site and Worker: `https://predict-favorites.aihuman750.workers.dev`
+- Site and Worker: `https://predict-favorites.aihuman750.workers.dev`
 - Predict market links: `https://predict.fun/market/<slug>`
 - PredAlpha rewards source: `https://api.predalpha.xyz/api/markets/rewards`
 
@@ -50,6 +50,10 @@ Local optional:
 
 - `PREDALPHA_API_KEY`: forwarded by `server.mjs` when proxying rewards data.
 - `PREDICT_API_KEY`: forwarded by `server.mjs` when proxying local orderbook data.
+
+Worker vars:
+
+- `SITE_ACCESS_MODE`: set to `public` in `wrangler.toml` for public access; any other value keeps the password gate active.
 
 GitHub Secrets required for deployment and report sending:
 

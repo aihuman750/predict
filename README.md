@@ -1,10 +1,10 @@
 # Predict Rewards Monitor
 
-Predict Rewards Monitor is a private Worker-hosted rewards-market dashboard for Predict alpha. It shows active rewards markets, links each row to the matching Predict market, tracks favorite markets in Cloudflare KV, monitors wallet positions and self-wallet open orders, and sends favorite-market reports to a Feishu bot.
+Predict Rewards Monitor is a public Worker-hosted rewards-market dashboard for Predict alpha. It shows active rewards markets, links each row to the matching Predict market, tracks favorite markets in Cloudflare KV, monitors wallet positions and self-wallet open orders, and sends favorite-market reports to a Feishu bot.
 
 Production URLs:
 
-- Private site and Worker: https://predict-favorites.aihuman750.workers.dev
+- Site and Worker: https://predict-favorites.aihuman750.workers.dev
 
 ## Features
 
@@ -51,17 +51,21 @@ The local server serves `public/`, proxies `/api/markets/rewards` to PredAlpha w
 npm test
 ```
 
-The test suite covers rewards-table helpers, Activate Points orderbook filtering, wallet/order formatting, report markdown generation, Worker favorite APIs, private site login, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
+The test suite covers rewards-table helpers, Activate Points orderbook filtering, wallet/order formatting, report markdown generation, Worker favorite APIs, public/private site access, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
 
 ## Deployment
 
-Cloudflare Worker deploys the private site, favorite storage, wallet monitoring, authenticated open-order monitoring, and report sending.
+Cloudflare Worker deploys the public site, favorite storage, wallet monitoring, authenticated open-order monitoring, and report sending.
 
 - Workflow: `.github/workflows/cloudflare-worker.yml`
 - Worker config: `wrangler.toml`
 - Worker name: `predict-favorites`
 - KV binding: `FAVORITES`
-- Static assets: `public/`, served by the Worker after password login.
+- Static assets: `public/`, served publicly by the Worker when `SITE_ACCESS_MODE = "public"`.
+
+Worker vars:
+
+- `SITE_ACCESS_MODE = "public"` keeps the deployed site publicly accessible. Removing it or changing it to another value restores the password gate.
 
 Daily Feishu report:
 
@@ -79,7 +83,7 @@ Required GitHub Secrets:
 - `REPORT_TOKEN`
 - `SITE_PASSWORD`
 
-Do not commit secret values to the repository.
+`SITE_PASSWORD` is still kept as a secret for private-mode login support and encrypted Predict JWT storage. Do not commit secret values to the repository.
 
 ## Documentation
 

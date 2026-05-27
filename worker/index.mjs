@@ -86,9 +86,13 @@ function reportAllowed(request, env, authenticated = false) {
   if (authenticated) return true;
   const token = env.REPORT_TOKEN;
   if (token && request.headers.get("x-report-token") === token) return true;
-  if (env.SITE_PASSWORD) return false;
+  if (siteRequiresLogin(env)) return false;
   const origin = request.headers.get("origin");
   return Boolean(origin && (origin === "null" || ALLOWED_ORIGINS.has(origin)));
+}
+
+function siteRequiresLogin(env) {
+  return String(env.SITE_ACCESS_MODE || "private").toLowerCase() !== "public";
 }
 
 function base64UrlFromBytes(bytes) {
@@ -758,18 +762,20 @@ export async function handleRequest(request, env, deps = {}) {
     return json({ ok: true }, { headers: { "set-cookie": clearSessionCookie() } }, origin);
   }
 
-  const authenticated = await isSiteAuthenticated(request, env, deps);
+  const requiresLogin = siteRequiresLogin(env);
+  const authenticated = requiresLogin ? await isSiteAuthenticated(request, env, deps) : true;
+  const hasPrivateSession = requiresLogin && Boolean(env.SITE_PASSWORD) && authenticated;
 
   if (url.pathname === "/api/site/status" && request.method === "GET") {
-    return json({ authenticated }, {}, origin);
+    return json({ authenticated, public: !requiresLogin }, {}, origin);
   }
 
   if (url.pathname === "/data/rewards.json" && request.method === "GET") {
-    if (!authenticated) return json({ error: "auth_required" }, { status: 401 }, origin);
+    if (requiresLogin && !authenticated) return json({ error: "auth_required" }, { status: 401 }, origin);
     return json(await fetchJson(fetcher, REWARDS_URL), {}, origin);
   }
 
-  if (url.pathname.startsWith("/api/") && !authenticated && url.pathname !== "/api/report/send") {
+  if (url.pathname.startsWith("/api/") && requiresLogin && !authenticated && url.pathname !== "/api/report/send") {
     return json({ error: "auth_required" }, { status: 401 }, origin);
   }
 
@@ -778,7 +784,7 @@ export async function handleRequest(request, env, deps = {}) {
   }
 
   if (url.pathname === "/api/favorites" && request.method === "POST") {
-    if (!writeAllowed(request, Boolean(env.SITE_PASSWORD) && authenticated)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+    if (!writeAllowed(request, hasPrivateSession)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
 
     const body = await request.json().catch(() => null);
     const favorite = cleanFavorite(body?.market);
@@ -795,7 +801,7 @@ export async function handleRequest(request, env, deps = {}) {
   }
 
   if (url.pathname === "/api/wallets" && request.method === "POST") {
-    if (!writeAllowed(request, Boolean(env.SITE_PASSWORD) && authenticated)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+    if (!writeAllowed(request, hasPrivateSession)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
 
     const body = await request.json().catch(() => null);
     const address = normalizeWalletAddress(body?.address);
@@ -889,7 +895,7 @@ export async function handleRequest(request, env, deps = {}) {
 
   const deleteMatch = url.pathname.match(/^\/api\/favorites\/([^/]+)$/);
   if (deleteMatch && request.method === "DELETE") {
-    if (!writeAllowed(request, Boolean(env.SITE_PASSWORD) && authenticated)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+    if (!writeAllowed(request, hasPrivateSession)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
 
     const key = decodeURIComponent(deleteMatch[1]);
     const favorites = await readFavorites(env);
@@ -900,7 +906,7 @@ export async function handleRequest(request, env, deps = {}) {
 
   const walletDeleteMatch = url.pathname.match(/^\/api\/wallets\/([^/]+)$/);
   if (walletDeleteMatch && request.method === "DELETE") {
-    if (!writeAllowed(request, Boolean(env.SITE_PASSWORD) && authenticated)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
+    if (!writeAllowed(request, hasPrivateSession)) return json({ error: "origin_not_allowed" }, { status: 403 }, origin);
 
     const address = normalizeWalletAddress(decodeURIComponent(walletDeleteMatch[1]));
     if (!address) return json({ error: "invalid_wallet_address" }, { status: 400 }, origin);
@@ -923,7 +929,7 @@ export async function handleRequest(request, env, deps = {}) {
   }
 
   if (env.ASSETS && request.method === "GET") {
-    if (!authenticated) return loginPage();
+    if (requiresLogin && !authenticated) return loginPage();
     const assetResponse = await env.ASSETS.fetch(request);
     const headers = new Headers(assetResponse.headers);
     headers.set("cache-control", "no-store");

@@ -63,6 +63,12 @@ gh workflow run daily-report.yml --repo aihuman750/predict
 
 ## Required Secrets
 
+Worker variables in `wrangler.toml`:
+
+| Name | Purpose |
+| --- | --- |
+| `SITE_ACCESS_MODE = "public"` | Makes the deployed Worker site publicly accessible. Removing it or changing it restores the password gate. |
+
 GitHub Secrets:
 
 | Name | Used by | Purpose |
@@ -73,7 +79,7 @@ GitHub Secrets:
 | `FEISHU_SECRET` | Worker deploy workflow | Copied into Worker secret storage for Feishu signature checks. |
 | `PREDICT_API_KEY` | Worker deploy workflow | Copied into Worker secret storage for Predict wallet positions. |
 | `REPORT_TOKEN` | Worker deploy workflow and daily report workflow | Authorizes scheduled report calls. |
-| `SITE_PASSWORD` | Worker deploy workflow | Copied into Worker secret storage for the private site login and encrypted Predict JWT storage. |
+| `SITE_PASSWORD` | Worker deploy workflow | Copied into Worker secret storage for private-mode login support and encrypted Predict JWT storage. |
 
 Worker secrets:
 
@@ -95,20 +101,19 @@ The Worker deployment workflow writes these values with `wrangler secret put`.
 
 ### Site Shows Login Page
 
-This is expected for browsers without a valid session. Enter the private site password. The cookie expires after 7 days.
+This should not happen in production while `SITE_ACCESS_MODE = "public"` is deployed. Check `wrangler.toml`, redeploy the Worker, and confirm `/api/site/status` returns `"public": true`. If private mode is intentionally restored, enter the site password; the cookie expires after 7 days.
 
 ### Site Loads But Rewards Are Stale
 
 1. Confirm `https://api.predalpha.xyz/api/markets/rewards` is reachable.
-2. Log in to the private site and open `https://predict-favorites.aihuman750.workers.dev/data/rewards.json`.
+2. Open `https://predict-favorites.aihuman750.workers.dev/data/rewards.json`.
 3. Check the latest `Deploy Cloudflare Worker` workflow run.
 
 ### Favorites Do Not Sync
 
 1. Check `https://predict-favorites.aihuman750.workers.dev/health`.
-2. Confirm the browser is logged in to the private Worker site.
-3. Check the `Deploy Cloudflare Worker` workflow status after any Worker change.
-4. Verify the KV binding in `wrangler.toml` is still named `FAVORITES`.
+2. Check the `Deploy Cloudflare Worker` workflow status after any Worker change.
+3. Verify the KV binding in `wrangler.toml` is still named `FAVORITES`.
 
 ### Manual Report Button Fails
 
