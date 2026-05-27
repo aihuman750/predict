@@ -141,7 +141,7 @@ function formatQuantity(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return "-";
   return number.toLocaleString("en-US", {
-    maximumFractionDigits: 3,
+    maximumFractionDigits: 0,
   });
 }
 

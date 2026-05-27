@@ -30,6 +30,10 @@ test("market table hides minimum shares and exposes Activate Points orderbook UI
   assert.match(appSource, /orderbook-qty-bar/);
 });
 
+test("orderbook quantities render as whole numbers", () => {
+  assert.match(appSource, /function formatQuantity[\s\S]*maximumFractionDigits: 0/);
+});
+
 test("index loads app script through a versioned URL", () => {
   assert.match(indexSource, /src="app\.mjs\?v=[0-9a-z.-]+"/);
 });
