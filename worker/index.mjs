@@ -35,6 +35,7 @@ const REPORT_STATE_KEY = "report:price-state:v1";
 const WALLETS_KEY = "wallets:v1";
 const PREDICT_AUTH_KEY = "predict:auth:v1";
 const POINTS_LEADERBOARD_KEY = "points:leaderboard:v1";
+const DEPLOY_VERSION = "20260603-backtest-v2";
 const REWARDS_URL = "https://api.predalpha.xyz/api/markets/rewards";
 const PREDICT_GRAPHQL_URL = "https://graphql.predict.fun/graphql";
 const PREDICT_AUTH_MESSAGE_URL = "https://api.predict.fun/v1/auth/message";
@@ -1448,7 +1449,7 @@ export async function handleRequest(request, env, deps = {}) {
   }
 
   if (url.pathname === "/health") {
-    return json({ ok: true }, {}, origin);
+    return json({ ok: true, version: DEPLOY_VERSION }, {}, origin);
   }
 
   if (url.pathname === "/api/site/login" && request.method === "POST") {
