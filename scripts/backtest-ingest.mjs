@@ -46,6 +46,7 @@ function usage() {
     "  --day 2026-06-01",
     "  --intervals 1h,15m,5m",
     "  --api-base https://api.predict.fun",
+    "  --store-matches",
     "  --dry-run",
   ].join("\n");
 }
@@ -60,6 +61,7 @@ export function parseArgs(argv) {
     mode: "backfill",
     sharesPerMarket: 100,
     start: null,
+    storeMatches: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -88,6 +90,8 @@ export function parseArgs(argv) {
       options.sharesPerMarket = Number(argv[++index]);
     } else if (arg === "--start") {
       options.start = argv[++index];
+    } else if (arg === "--store-matches") {
+      options.storeMatches = true;
     } else if (arg === "--help" || arg === "-h") {
       options.help = true;
     } else {
@@ -539,7 +543,7 @@ async function ingestDay({ apiKey, day, interval, options }) {
     matchCount += matches.length;
     console.log(`${day} ${interval}: market=${market.marketId} pages=${pages} rawMatches=${rows.length} parsedMatches=${matches.length} truncated=${truncated}`);
     await putMarket(market, options);
-    await putMatches(matches, options);
+    if (options.storeMatches) await putMatches(matches, options);
     markets.push({ market, matches });
     if ((index + 1) % progressEvery === 0 || index + 1 === starts.length) {
       console.log(`${day} ${interval}: processed=${index + 1}/${starts.length} markets=${markets.length} matches=${matchCount}`);

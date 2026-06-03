@@ -16,7 +16,7 @@ on:
         default: "1h,15m,5m"
         required: false
       reset:
-        description: "Delete existing backtest D1 rows before ingestion"
+        description: "Use true/all to delete all backtest rows, or matches to delete only match rows"
         default: "false"
         required: false
 
@@ -35,21 +35,26 @@ jobs:
       - run: npm ci
 
       - name: Reset backtest tables
-        if: ${{ github.event.inputs.reset == 'true' }}
+        if: ${{ github.event.inputs.reset != '' && github.event.inputs.reset != 'false' }}
         env:
           BACKTEST_D1_DATABASE_ID: ${{ secrets.BACKTEST_D1_DATABASE_ID }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RESET_MODE: ${{ github.event.inputs.reset }}
         run: |
           node --input-type=module <<'NODE'
           import { executeD1 } from "./scripts/backtest-ingest.mjs";
 
-          for (const sql of [
-            "DELETE FROM backtest_matches",
-            "DELETE FROM backtest_daily_matrices",
-            "DELETE FROM backtest_markets",
-            "DELETE FROM backtest_ingestion_runs",
-          ]) {
+          const mode = String(process.env.RESET_MODE || "false").toLowerCase();
+          const sqls = ["DELETE FROM backtest_matches"];
+          if (mode === "true" || mode === "all") {
+            sqls.push(
+              "DELETE FROM backtest_daily_matrices",
+              "DELETE FROM backtest_markets",
+              "DELETE FROM backtest_ingestion_runs",
+            );
+          }
+          for (const sql of sqls) {
             await executeD1(sql);
           }
           NODE

@@ -85,6 +85,12 @@ test("parseArgs defaults to a 60-day UTC backfill ending yesterday", () => {
   assert.equal(parsed.start, "2026-05-01");
   assert.equal(parsed.end, "2026-05-02");
   assert.deepEqual(parsed.intervals, ["5m", "15m"]);
+  assert.equal(parsed.storeMatches, false);
+});
+
+test("parseArgs can opt into storing match audit rows", () => {
+  const parsed = parseArgs(["--day", "2026-06-01", "--store-matches"]);
+  assert.equal(parsed.storeMatches, true);
 });
 
 test("executeD1 retries transient fetch failures", async () => {
