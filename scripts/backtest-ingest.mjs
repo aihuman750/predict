@@ -418,8 +418,8 @@ async function putMarket(market, options) {
   if (options.dryRun) return;
   await executeD1(
     `INSERT INTO backtest_markets
-      (market_id, interval, slug, starts_at, ends_at, winner, source_day, raw_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      (market_id, interval, slug, starts_at, ends_at, winner, source_day, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(market_id) DO UPDATE SET
       interval = excluded.interval,
       slug = excluded.slug,
@@ -427,9 +427,8 @@ async function putMarket(market, options) {
       ends_at = excluded.ends_at,
       winner = excluded.winner,
       source_day = excluded.source_day,
-      raw_json = excluded.raw_json,
       updated_at = CURRENT_TIMESTAMP`,
-    [market.marketId, market.interval, market.slug, market.startsAt, market.endsAt, market.winner, market.sourceDay, market.rawJson],
+    [market.marketId, market.interval, market.slug, market.startsAt, market.endsAt, market.winner, market.sourceDay],
     optionsEnv(options),
   );
 }

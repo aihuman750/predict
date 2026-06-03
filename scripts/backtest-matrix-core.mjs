@@ -1,8 +1,10 @@
 const PRICE_SCALE = 1_000_000;
 const SHARE_SCALE = 1_000_000;
+const STORED_MATRIX_SCALE = 1_000;
 const DEFAULT_SHARES = 100;
 export const HOLD_EXPIRY = "HOLD_EXPIRY";
 const EPSILON = 1e-9;
+const STORED_MATRIX_KEYS = ["buyShares", "pnl", "sellShares"];
 
 export const BACKTEST_INTERVAL_MINUTES = {
   "1h": 60,
@@ -95,21 +97,15 @@ function emptyArray() {
 export function createEmptyBacktestMatrix() {
   return {
     buyShares: emptyArray(),
-    cost: emptyArray(),
-    payout: emptyArray(),
     pnl: emptyArray(),
     sellShares: emptyArray(),
-    settlementShares: emptyArray(),
   };
 }
 
 function addCell(matrix, index, result) {
   matrix.buyShares[index] += result.buyShares;
-  matrix.cost[index] += result.cost;
-  matrix.payout[index] += result.payout;
   matrix.pnl[index] += result.pnl;
   matrix.sellShares[index] += result.sellShares;
-  matrix.settlementShares[index] += result.settlementShares;
 }
 
 function normalizeMatchesForPerspective(matches, perspective) {
@@ -121,7 +117,7 @@ function normalizeMatchesForPerspective(matches, perspective) {
 }
 
 export function addBacktestMatrices(target, source) {
-  for (const key of ["buyShares", "cost", "payout", "pnl", "sellShares", "settlementShares"]) {
+  for (const key of STORED_MATRIX_KEYS) {
     const targetValues = target[key];
     const sourceValues = source?.[key] || [];
     for (let index = 0; index < targetValues.length; index += 1) {
@@ -132,7 +128,7 @@ export function addBacktestMatrices(target, source) {
 }
 
 function roundMatrix(matrix) {
-  for (const key of ["buyShares", "cost", "payout", "pnl", "sellShares", "settlementShares"]) {
+  for (const key of STORED_MATRIX_KEYS) {
     matrix[key] = matrix[key].map((value) => Number(value.toFixed(6)));
   }
   return matrix;
@@ -261,30 +257,55 @@ export function buildBacktestMatrix({
 }
 
 export function serializeBacktestMatrix(matrix) {
+  const scale = STORED_MATRIX_SCALE;
+  const compactArray = (values) => {
+    const source = values || [];
+    return Array.from({ length: BUY_PRICE_MICROS.length * SELL_PRICE_MICROS.length }, (_, index) => {
+      const value = Number(source[index] || 0);
+      return Number.isFinite(value) ? Math.round(value * scale) : 0;
+    });
+  };
   return JSON.stringify({
-    axes: {
-      buyPrices: BUY_PRICE_LABELS,
-      sellPrices: SELL_PRICE_LABELS,
+    m: {
+      b: compactArray(matrix?.buyShares),
+      p: compactArray(matrix?.pnl),
+      s: compactArray(matrix?.sellShares),
     },
-    matrix,
-    version: 1,
+    scale,
+    version: 2,
   });
 }
 
 export function parseBacktestMatrixPayload(value) {
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
-  return parsed?.matrix || parsed;
+  if (parsed?.version === 2 && parsed?.m) {
+    const scale = Number(parsed.scale || STORED_MATRIX_SCALE);
+    const expandArray = (values) => {
+      const source = Array.isArray(values) ? values : [];
+      return Array.from({ length: BUY_PRICE_MICROS.length * SELL_PRICE_MICROS.length }, (_, index) => {
+        const value = Number(source[index] || 0);
+        return Number.isFinite(value) ? value / scale : 0;
+      });
+    };
+    return {
+      buyShares: expandArray(parsed.m.b),
+      pnl: expandArray(parsed.m.p),
+      sellShares: expandArray(parsed.m.s),
+    };
+  }
+  const matrix = parsed?.matrix || parsed || {};
+  return {
+    buyShares: matrix.buyShares || emptyArray(),
+    pnl: matrix.pnl || emptyArray(),
+    sellShares: matrix.sellShares || emptyArray(),
+  };
 }
 
 export function summarizeBacktestMatrix(matrix) {
   const pnl = matrix?.pnl || [];
-  const cost = matrix?.cost || [];
-  const payout = matrix?.payout || [];
   return {
     bestPnl: pnl.length ? Math.max(...pnl) : 0,
     cells: pnl.length,
-    cost: Number(cost.reduce((sum, value) => sum + Number(value || 0), 0).toFixed(6)),
-    payout: Number(payout.reduce((sum, value) => sum + Number(value || 0), 0).toFixed(6)),
     worstPnl: pnl.length ? Math.min(...pnl) : 0,
   };
 }

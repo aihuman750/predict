@@ -9,7 +9,9 @@ import {
   buildBacktestMatrix,
   createEmptyBacktestMatrix,
   normalizedCutoffMinutes,
+  parseBacktestMatrixPayload,
   priceToMicros,
+  serializeBacktestMatrix,
   simulateBacktestCell,
 } from "../scripts/backtest-matrix-core.mjs";
 
@@ -157,4 +159,24 @@ test("daily matrices add element-wise", () => {
   const holdIndex = SELL_PRICE_MICROS.indexOf(HOLD_EXPIRY);
   const cellIndex = holdIndex * BUY_PRICE_MICROS.length + buyIndex;
   assert.equal(total.pnl[cellIndex], 190);
+});
+
+test("serialized matrices keep only compact heatmap fields", () => {
+  const matrix = createEmptyBacktestMatrix();
+  matrix.buyShares[0] = 100.1234;
+  matrix.pnl[0] = 95.9876;
+  matrix.sellShares[0] = 4.5;
+
+  const serialized = serializeBacktestMatrix(matrix);
+  const payload = JSON.parse(serialized);
+  const parsed = parseBacktestMatrixPayload(serialized);
+
+  assert.equal(payload.version, 2);
+  assert.deepEqual(Object.keys(payload.m).sort(), ["b", "p", "s"]);
+  assert.equal(serialized.includes("cost"), false);
+  assert.equal(serialized.includes("payout"), false);
+  assert.equal(serialized.includes("buyPrices"), false);
+  assert.equal(parsed.buyShares[0], 100.123);
+  assert.equal(parsed.pnl[0], 95.988);
+  assert.equal(parsed.sellShares[0], 4.5);
 });

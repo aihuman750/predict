@@ -1075,12 +1075,17 @@ function renderBacktestHeatmap(title, matrix) {
             ${buyPrices.map((buyPrice, buyIndex) => {
               const cellIndex = sellIndex * buyPrices.length + buyIndex;
               const pnl = Number(matrix?.pnl?.[cellIndex] || 0);
+              const buyShares = Number(matrix?.buyShares?.[cellIndex] || 0);
+              const storedCost = Number(matrix?.cost?.[cellIndex]);
+              const cost = Number.isFinite(storedCost) ? storedCost : buyShares * Number(buyPrice);
+              const storedPayout = Number(matrix?.payout?.[cellIndex]);
+              const payout = Number.isFinite(storedPayout) ? storedPayout : cost + pnl;
               const titleText = [
                 `买入 ${buyPrice}`,
                 `卖出 ${sellPrice === "HOLD_EXPIRY" ? "持有到期" : sellPrice}`,
-                `成本 ${formatBacktestMetric(matrix?.cost?.[cellIndex] || 0)}U`,
-                `回款 ${formatBacktestMetric(matrix?.payout?.[cellIndex] || 0)}U`,
-                `买入份额 ${formatBacktestMetric(matrix?.buyShares?.[cellIndex] || 0)}`,
+                `成本 ${formatBacktestMetric(cost)}U`,
+                `回款 ${formatBacktestMetric(payout)}U`,
+                `买入份额 ${formatBacktestMetric(buyShares)}`,
                 `卖出份额 ${formatBacktestMetric(matrix?.sellShares?.[cellIndex] || 0)}`,
                 `利润 ${formatBacktestMetric(pnl)}U`,
               ].join(" · ");

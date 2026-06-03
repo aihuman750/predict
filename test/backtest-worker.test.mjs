@@ -74,8 +74,6 @@ function matrixWithPnl({ buyPrice = 0.05, pnl = 12.34, sellPrice = HOLD_EXPIRY }
   const sellIndex = SELL_PRICE_MICROS.indexOf(sellPrice === HOLD_EXPIRY ? HOLD_EXPIRY : priceToMicros(sellPrice));
   const cellIndex = sellIndex * BUY_PRICE_MICROS.length + buyIndex;
   matrix.pnl[cellIndex] = pnl;
-  matrix.cost[cellIndex] = 5;
-  matrix.payout[cellIndex] = 5 + pnl;
   matrix.buyShares[cellIndex] = 100;
   return matrix;
 }
