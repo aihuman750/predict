@@ -145,7 +145,6 @@ test("putMatches batches match inserts without D1 SQL variables", async () => {
         outcome: "yes",
         priceMicros: 10_000,
         quoteType: "ask",
-        rawJson: "{\"note\":\"can't\"}",
         sharesMicros: 100_000_000,
       },
       {
@@ -156,7 +155,6 @@ test("putMatches batches match inserts without D1 SQL variables", async () => {
         outcome: "no",
         priceMicros: 20_000,
         quoteType: "bid",
-        rawJson: "{}",
         sharesMicros: 50_000_000,
       },
     ], {
@@ -174,7 +172,7 @@ test("putMatches batches match inserts without D1 SQL variables", async () => {
 
   assert.equal(bodies.length, 1);
   assert.match(bodies[0].sql, /VALUES \('a', '1', 'yes', 'ask'/);
-  assert.match(bodies[0].sql, /can''t/);
+  assert.doesNotMatch(bodies[0].sql, /raw_json/);
   assert.equal(bodies[0].params.length, 0);
 });
 
@@ -193,7 +191,6 @@ test("putMatches splits batches below D1 SQL variable limits", async () => {
     outcome: index % 2 === 0 ? "yes" : "no",
     priceMicros: 10_000,
     quoteType: "ask",
-    rawJson: "{}",
     sharesMicros: 100_000_000,
   }));
 

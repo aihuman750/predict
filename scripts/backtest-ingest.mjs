@@ -318,7 +318,6 @@ export function parseMatchRow(match = {}, market = {}) {
     outcome,
     priceMicros,
     quoteType,
-    rawJson: JSON.stringify(match),
     sharesMicros,
   };
 }
@@ -450,12 +449,11 @@ export async function putMatches(matches, options) {
         row.elapsedSeconds,
         row.priceMicros,
         row.sharesMicros,
-        row.rawJson,
       ].map(sqlLiteral).join(", ")
     })`).join(", ");
     await executeD1(
       `INSERT OR IGNORE INTO backtest_matches
-        (dedupe_hash, market_id, outcome, quote_type, executed_at, elapsed_seconds, price_micros, shares_micros, raw_json)
+        (dedupe_hash, market_id, outcome, quote_type, executed_at, elapsed_seconds, price_micros, shares_micros)
        VALUES ${values}`,
       [],
       optionsEnv(options),
