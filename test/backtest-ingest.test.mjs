@@ -53,6 +53,10 @@ test("parseCategoryMarket extracts resolved market metadata", () => {
   assert.equal(parsed.sourceDay, "2026-06-01");
 });
 
+test("parseCategoryMarket skips missing category payloads", () => {
+  assert.equal(parseCategoryMarket(null, { interval: "15m", sourceDay: "2026-06-01" }), null);
+});
+
 test("parseMatchRow normalizes quote type, outcome, price, shares, and dedupe hash", () => {
   const row = parseMatchRow({
     amountFilled: "25000000000000000000",

@@ -239,7 +239,8 @@ async function fetchJson(url, apiKey, attempt = 1) {
 }
 
 function primaryMarket(category = {}) {
-  return Array.isArray(category.markets) ? category.markets[0] : category.market;
+  const safeCategory = category || {};
+  return Array.isArray(safeCategory.markets) ? safeCategory.markets[0] : safeCategory.market;
 }
 
 function winningOutcome(category = {}) {
