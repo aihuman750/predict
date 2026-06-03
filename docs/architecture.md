@@ -4,9 +4,10 @@
 
 Predict Rewards Monitor has three runtime surfaces:
 
-1. Public Cloudflare Worker site for frontend assets, API routes, favorites, wallet monitoring, and reports.
+1. Public Cloudflare Worker site for frontend assets, API routes, favorites, wallet monitoring, reports, and BTC strategy backtests.
 2. Local development server for proxying live rewards data.
-3. Predict APIs for positions, wallet auth, open orders, and market metadata.
+3. Predict APIs for positions, wallet auth, open orders, market metadata, and historical matches.
+4. Cloudflare D1 for BTC backtest market metadata, historical matches, ingestion runs, and daily precomputed heatmap matrices.
 
 ```mermaid
 flowchart LR
@@ -15,10 +16,13 @@ flowchart LR
   E --> D
   E --> F["Cloudflare KV"]
   E --> G["Feishu bot webhook"]
-  E --> H["Google News RSS"]
+  E --> H["OpenAI Responses API with web search"]
   E --> J["Predict positions API"]
   E --> K["Predict auth and orders API"]
+  E --> L["Cloudflare D1 backtest DB"]
   I["Daily report workflow"] --> E
+  M["Backtest ingestion workflow"] --> L
+  M --> N["Predict categories and matches API"]
 ```
 
 ## Frontend
@@ -30,6 +34,8 @@ Files:
 - `public/rewards-core.mjs`: shared rewards helpers and pure market logic.
 - `public/wallet-core.mjs`: wallet address validation, position/order summaries, and market favorite conversion.
 - `public/styles.css`: visual layout.
+
+The strategy backtest view is available at `#backtest`. It reads public Worker APIs and renders two large heatmaps: Yes perspective and No perspective. The date controls are UTC day-based, not minute or hour-based.
 
 Production data path:
 
@@ -79,6 +85,13 @@ KV namespace:
 - Binding: `FAVORITES`
 - Production id: `0e28a446d5f1460489ca5a7a8400a133`
 
+D1 database:
+
+- Binding: `BACKTEST_DB`
+- Database name: `predict_backtest`
+- Migration: `migrations/0001_backtest.sql`
+- `wrangler.toml` contains a placeholder `database_id`; replace it with the production D1 id before deploying the backtest routes.
+
 Routes:
 
 | Method | Path | Purpose |
@@ -88,6 +101,10 @@ Routes:
 | `POST` | `/api/site/logout` | Clear the site session cookie. |
 | `GET` | `/api/site/status` | Return whether the site is public and whether the current request is authenticated. |
 | `GET` | `/api/favorites` | Return all favorite markets. |
+| `GET` | `/api/backtest/meta` | Return BTC backtest coverage, intervals, and price axes. |
+| `GET` | `/api/backtest/heatmap` | Return summed Yes/No backtest heatmap matrices for a UTC date range, interval selection, and cutoff. |
+| `GET` | `/api/points/leaderboard` | Return cached top-200 weekly points accounts with portfolio statistics. |
+| `GET` | `/api/points/accounts/:address` | Return one points account's public positions, cached trade details, market-grouped trades, and strategy summary. |
 | `POST` | `/api/favorites` | Upsert one favorite market. |
 | `DELETE` | `/api/favorites/:key` | Remove one favorite market. |
 | `POST` | `/api/report/send` | Build and send the current favorite-market report to Feishu. |
@@ -101,7 +118,7 @@ Routes:
 | `GET` | `/api/wallets/summary` | Fetch monitored wallet positions and auto-merge position markets into favorites. |
 | `GET` | `/api/wallets/me/orders` | Fetch authenticated self-wallet open orders and auto-merge their markets into favorites. |
 
-Production sets `SITE_ACCESS_MODE = "public"`, so static assets and normal site APIs do not require a password session. Browser write routes still enforce allowed origins. If `SITE_ACCESS_MODE` is removed or set to any other value, all API routes except `/health`, `/api/site/login`, `/api/site/logout`, `/api/site/status`, and token-authorized `/api/report/send` require a valid site session cookie, and static assets are served only after this check.
+Production sets `SITE_ACCESS_MODE = "public"`, so static assets and normal site APIs do not require a password session. Browser write routes still enforce allowed origins. Wallet and Predict auth APIs require a private `pa_session` even in public mode because they expose wallet identifiers and JWT-backed account data. Backtest APIs and points monitor APIs are public read-only and never expose the Predict API key. If `SITE_ACCESS_MODE` is removed or set to any other value, all API routes except `/health`, `/api/site/login`, `/api/site/logout`, `/api/site/status`, public backtest reads, and token-authorized `/api/report/send` require a valid site session cookie, and static assets are served only after this check.
 
 ## Data Model
 
@@ -155,9 +172,26 @@ KV key: `predict:auth:v1`
 
 Value shape: encrypted JSON created by the Worker. The plaintext contains the login signer address, the connected Predict account address, the Predict JWT, and the save timestamp. The plaintext value must not be logged or committed.
 
+KV key: `points:leaderboard:v1`
+
+Value shape: cached JSON for `/api/points/leaderboard`, including `fetchedAt`, `windows`, and the normalized top-200 points accounts.
+
+KV key pattern: `points:trades:v1:<address>:<lastWeekFrom>:<thisWeekFrom>`
+
+Value shape: cached JSON for one points account's `lastWeekTrades` and `thisWeekTrades`. Cached trade rows should include Predict market IDs/titles when available so the detail page can group multiple outcomes under the same event. If the Worker falls back to BNB Chain logs, the fallback rows can use outcome asset IDs when market metadata is unavailable.
+
+D1 tables:
+
+- `backtest_markets`: BTC market metadata keyed by `market_id`, with `interval`, `slug`, `starts_at`, `ends_at`, `winner`, and `source_day`.
+- `backtest_matches`: raw historical match rows for audit and recomputation, keyed by `dedupe_hash`, with normalized `outcome`, `quote_type`, `elapsed_seconds`, `price_micros`, and `shares_micros`.
+- `backtest_daily_matrices`: daily precomputed matrices keyed by `day + interval + cutoff_minutes + perspective`. `matrix_blob` stores a serialized matrix payload; production ingestion writes gzip-compressed blobs.
+- `backtest_ingestion_runs`: backfill and daily ingestion status, covered day range, errors, and aggregate counts.
+
+The backtest strategy uses `100` shares per market per perspective. Buy prices are `0.01..0.99`; sell rows are `0.01..0.99` plus `HOLD_EXPIRY`. A sell row fills against historical buyer-side volume after a passive buy fill. Remaining inventory settles at expiry according to the resolved winning outcome.
+
 ## Report Generation
 
-Shared report helpers live in `scripts/report-core.mjs`.
+Shared report helpers live in `scripts/report-core.mjs`. Fixed market-summary inputs for GPT live in `scripts/market-profile-core.mjs`.
 
 The Worker report flow:
 
@@ -165,14 +199,16 @@ The Worker report flow:
 2. Fetch current rewards markets from `https://api.predalpha.xyz/api/markets/rewards`.
 3. Read the previous price snapshot from KV.
 4. Build price rows with latest Yes/No prices and deltas.
-5. Search Google News RSS for event progress within a 48 hour window.
-6. Send a signed interactive card to Feishu.
-7. Store a new price snapshot in KV.
+5. Build a fixed brief for each favorite market from exact overrides or deterministic market-title patterns.
+6. Send the market titles and fixed briefs to OpenAI Responses API with web search enabled.
+7. Render GPT's sourced price-impact rows into the report. If OpenAI is not configured or fails, render fallback rows and keep the price table.
+8. Send a signed interactive card to Feishu.
+9. Store a new price snapshot in KV.
 
 The report has two sections:
 
 - Price changes: latest Yes/No and delta from the previous snapshot.
-- Event progress: matching news item or `无进展`.
+- Price impact brief: source-backed information that may affect market prices, with likely direction, strength, confidence, and source links. Missing updates render as `未发现高影响更新`.
 
 ## Activate Points Orderbooks
 
@@ -190,6 +226,29 @@ For each market:
 6. Expand the row to show active bid/ask Yes prices and quantities, with green bid bars and red ask bars scaled by quantity.
 
 The count is an eligible aggregated quantity total, not an individual-order count. Predict's public orderbook endpoint does not expose maker addresses, order hashes, or order age, so the UI cannot verify the five-minute active-order requirement.
+
+## Points Monitoring
+
+The points monitor page is available at `#points`.
+
+Points weeks are calculated from Predict week 23, which starts on 2026-05-21 Asia/Shanghai time; week numbers advance every seven days.
+
+`GET /api/points/leaderboard`:
+
+1. Reads `points:leaderboard:v1` from KV when the cache is fresh.
+2. Otherwise queries `https://graphql.predict.fun/graphql` for leaderboard pages and account statistics.
+3. Scans up to 1,000 public leaderboard accounts, sorts them locally by `allocationRoundPoints`, and returns the top 200 weekly-points accounts.
+4. Normalizes weekly rank, all-time rank, account name, wallet address, positions value, PnL, total volume, weekly points, and position count.
+
+`GET /api/points/accounts/:address`:
+
+1. Fetches public account positions from Predict GraphQL.
+2. Reads cached trade details from `points:trades:v1:<address>:<lastWeekFrom>:<thisWeekFrom>`.
+3. If no fresh trade cache exists, scans public BNB Chain Predict exchange logs for the account and stores the parsed result in KV.
+4. Groups trades by `marketId` so multiple outcomes under one event are analyzed together.
+5. Generates a concise strategy summary from trade count, unique transaction count, buy/sell skew, median price, contract mix, and event concentration.
+
+Predict GraphQL `ordersEventLog` still requires authentication for arbitrary accounts, so the Worker must not rely on it for public account trade history.
 
 ## Wallet Monitoring
 

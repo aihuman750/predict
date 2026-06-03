@@ -63,7 +63,16 @@ function tableCell(value) {
   return String(value ?? "-").replaceAll("\n", " ").replaceAll("|", "\\|");
 }
 
-export function buildReportMarkdown({ dateLabel, priceRows, progressRows }) {
+function formatSourceLinks(sources) {
+  const rows = (Array.isArray(sources) ? sources : []).slice(0, 2).map((source) => {
+    const label = source.source || source.title || source.url || "来源";
+    const linked = source.url ? `[${label}](${source.url})` : label;
+    return source.publishedAt ? `${linked}，${source.publishedAt}` : linked;
+  });
+  return rows.length ? rows.join("; ") : "-";
+}
+
+export function buildReportMarkdown({ dateLabel, priceRows, impactRows = [] }) {
   const priceTable = priceRows.length
     ? [
         "| 市场 | Yes 最新 | Yes 变化 | No 最新 | No 变化 |",
@@ -75,11 +84,14 @@ export function buildReportMarkdown({ dateLabel, priceRows, progressRows }) {
       ].join("\n")
     : "暂无收藏市场。";
 
-  const progressTable = progressRows.length
+  const impactTable = impactRows.length
     ? [
-        "| 市场 | 事件进度 |",
-        "| --- | --- |",
-        ...progressRows.map((row) => `| ${tableCell(row.title)} | ${tableCell(row.progress || "无进展")} |`),
+        "| 市场 | 关键信息 | 潜在影响 | 强度 | 置信度 | 来源 |",
+        "| --- | --- | --- | ---: | ---: | --- |",
+        ...impactRows.map((row) => {
+          const title = row.url ? `[${row.title}](${row.url})` : row.title;
+          return `| ${tableCell(title)} | ${tableCell(row.information || "未发现高影响更新")} | ${tableCell(row.impact || "无")} | ${tableCell(row.strength || "无")} | ${tableCell(row.confidence || "-")} | ${tableCell(formatSourceLinks(row.sources))} |`;
+        }),
       ].join("\n")
     : "暂无收藏市场。";
 
@@ -90,7 +102,7 @@ export function buildReportMarkdown({ dateLabel, priceRows, progressRows }) {
     "### 1. 价格变动",
     priceTable,
     "",
-    "### 2. 事件进度",
-    progressTable,
+    "### 2. 价格影响简报",
+    impactTable,
   ].join("\n");
 }

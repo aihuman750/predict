@@ -1,0 +1,290 @@
+const PRICE_SCALE = 1_000_000;
+const SHARE_SCALE = 1_000_000;
+const DEFAULT_SHARES = 100;
+export const HOLD_EXPIRY = "HOLD_EXPIRY";
+const EPSILON = 1e-9;
+
+export const BACKTEST_INTERVAL_MINUTES = {
+  "1h": 60,
+  "15m": 15,
+  "5m": 5,
+};
+
+export const BUY_PRICE_MICROS = Array.from({ length: 99 }, (_, index) => (index + 1) * 10_000);
+export const SELL_PRICE_MICROS = [...BUY_PRICE_MICROS, HOLD_EXPIRY];
+export const BUY_PRICE_LABELS = BUY_PRICE_MICROS.map(formatPriceMicros);
+export const SELL_PRICE_LABELS = [
+  ...BUY_PRICE_MICROS.map(formatPriceMicros),
+  HOLD_EXPIRY,
+];
+
+export function formatPriceMicros(value) {
+  return (Number(value) / PRICE_SCALE).toFixed(2);
+}
+
+export function priceToMicros(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * PRICE_SCALE);
+}
+
+export function sharesToMicros(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.round(number * SHARE_SCALE);
+}
+
+export function normalizePerspective(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["yes", "y", "up", "long"].includes(normalized)) return "yes";
+  if (["no", "n", "down", "short"].includes(normalized)) return "no";
+  return normalized;
+}
+
+export function normalizeQuoteType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "ask" || normalized === "sell") return "ask";
+  if (normalized === "bid" || normalized === "buy") return "bid";
+  return normalized;
+}
+
+export function normalizeBacktestMatch(match = {}) {
+  const executedAt = match.executed_at || match.executedAt || null;
+  const priceMicros = Number(match.price_micros ?? match.priceMicros ?? priceToMicros(match.price));
+  const sharesMicros = Number(match.shares_micros ?? match.sharesMicros ?? sharesToMicros(match.shares));
+  return {
+    dedupeHash: match.dedupe_hash || match.dedupeHash || null,
+    elapsedSeconds: Number(match.elapsed_seconds ?? match.elapsedSeconds ?? 0),
+    executedAt,
+    outcome: normalizePerspective(match.outcome),
+    priceMicros: Number.isFinite(priceMicros) ? priceMicros : 0,
+    quoteType: normalizeQuoteType(match.quote_type ?? match.quoteType),
+    shares: Number.isFinite(sharesMicros) ? sharesMicros / SHARE_SCALE : 0,
+  };
+}
+
+export function normalizeBacktestMarket(market = {}) {
+  return {
+    endsAt: market.ends_at || market.endsAt || null,
+    interval: market.interval || null,
+    marketId: String(market.market_id ?? market.marketId ?? market.id ?? ""),
+    slug: market.slug || "",
+    startsAt: market.starts_at || market.startsAt || null,
+    winner: normalizePerspective(market.winner),
+  };
+}
+
+export function normalizedCutoffMinutes(cutoffMinutes, interval) {
+  const requested = Math.max(1, Math.floor(Number(cutoffMinutes) || 1));
+  const maxMinutes = BACKTEST_INTERVAL_MINUTES[interval] || requested;
+  return Math.min(requested, maxMinutes);
+}
+
+function byExecutionTime(left, right) {
+  const leftMs = Date.parse(left.executedAt || "");
+  const rightMs = Date.parse(right.executedAt || "");
+  const safeLeft = Number.isFinite(leftMs) ? leftMs : 0;
+  const safeRight = Number.isFinite(rightMs) ? rightMs : 0;
+  return safeLeft - safeRight;
+}
+
+function emptyArray() {
+  return Array(BUY_PRICE_MICROS.length * SELL_PRICE_MICROS.length).fill(0);
+}
+
+export function createEmptyBacktestMatrix() {
+  return {
+    buyShares: emptyArray(),
+    cost: emptyArray(),
+    payout: emptyArray(),
+    pnl: emptyArray(),
+    sellShares: emptyArray(),
+    settlementShares: emptyArray(),
+  };
+}
+
+function addCell(matrix, index, result) {
+  matrix.buyShares[index] += result.buyShares;
+  matrix.cost[index] += result.cost;
+  matrix.payout[index] += result.payout;
+  matrix.pnl[index] += result.pnl;
+  matrix.sellShares[index] += result.sellShares;
+  matrix.settlementShares[index] += result.settlementShares;
+}
+
+function normalizeMatchesForPerspective(matches, perspective) {
+  const normalizedPerspectiveValue = normalizePerspective(perspective);
+  return matches
+    .map(normalizeBacktestMatch)
+    .filter((match) => match.outcome === normalizedPerspectiveValue && match.shares > EPSILON)
+    .sort(byExecutionTime);
+}
+
+export function addBacktestMatrices(target, source) {
+  for (const key of ["buyShares", "cost", "payout", "pnl", "sellShares", "settlementShares"]) {
+    const targetValues = target[key];
+    const sourceValues = source?.[key] || [];
+    for (let index = 0; index < targetValues.length; index += 1) {
+      targetValues[index] += Number(sourceValues[index] || 0);
+    }
+  }
+  return target;
+}
+
+function roundMatrix(matrix) {
+  for (const key of ["buyShares", "cost", "payout", "pnl", "sellShares", "settlementShares"]) {
+    matrix[key] = matrix[key].map((value) => Number(value.toFixed(6)));
+  }
+  return matrix;
+}
+
+function simulateBacktestCellWithNormalizedMatches({
+  buyPriceMicros,
+  cutoffMinutes,
+  interval,
+  market,
+  normalizedMatches = [],
+  perspective,
+  sellPriceMicros,
+  sharesPerMarket = DEFAULT_SHARES,
+} = {}) {
+  const normalizedMarket = normalizeBacktestMarket(market);
+  const cutoffSeconds = normalizedCutoffMinutes(cutoffMinutes, interval || normalizedMarket.interval) * 60;
+  const normalizedPerspectiveValue = normalizePerspective(perspective);
+
+  let buyRemaining = sharesPerMarket;
+  let inventory = 0;
+  let buyShares = 0;
+  let sellShares = 0;
+  let cost = 0;
+  let sellProceeds = 0;
+
+  for (const match of normalizedMatches) {
+    if (
+      buyRemaining > EPSILON &&
+      match.quoteType === "ask" &&
+      match.elapsedSeconds >= 0 &&
+      match.elapsedSeconds < cutoffSeconds &&
+      match.priceMicros <= buyPriceMicros
+    ) {
+      const filled = Math.min(buyRemaining, match.shares);
+      buyRemaining -= filled;
+      inventory += filled;
+      buyShares += filled;
+      cost += filled * (buyPriceMicros / PRICE_SCALE);
+    }
+
+    if (
+      sellPriceMicros !== HOLD_EXPIRY &&
+      inventory > EPSILON &&
+      match.quoteType === "bid" &&
+      match.priceMicros >= sellPriceMicros
+    ) {
+      const filled = Math.min(inventory, match.shares);
+      inventory -= filled;
+      sellShares += filled;
+      sellProceeds += filled * (sellPriceMicros / PRICE_SCALE);
+    }
+  }
+
+  const settlementShares = normalizedMarket.winner === normalizedPerspectiveValue ? inventory : 0;
+  const settlementPayout = settlementShares;
+  const payout = sellProceeds + settlementPayout;
+
+  return {
+    buyShares,
+    cost,
+    payout,
+    pnl: payout - cost,
+    sellShares,
+    settlementShares,
+  };
+}
+
+export function simulateBacktestCell({
+  buyPriceMicros,
+  cutoffMinutes,
+  interval,
+  market,
+  matches = [],
+  perspective,
+  sellPriceMicros,
+  sharesPerMarket = DEFAULT_SHARES,
+} = {}) {
+  return simulateBacktestCellWithNormalizedMatches({
+    buyPriceMicros,
+    cutoffMinutes,
+    interval,
+    market,
+    normalizedMatches: normalizeMatchesForPerspective(matches, perspective),
+    perspective,
+    sellPriceMicros,
+    sharesPerMarket,
+  });
+}
+
+export function buildBacktestMatrix({
+  cutoffMinutes = 1,
+  interval,
+  markets = [],
+  perspective,
+  sharesPerMarket = DEFAULT_SHARES,
+} = {}) {
+  const matrix = createEmptyBacktestMatrix();
+
+  for (const row of markets) {
+    const market = normalizeBacktestMarket(row.market || row);
+    const matches = row.matches || [];
+    const effectiveInterval = interval || market.interval;
+    const normalizedMatches = normalizeMatchesForPerspective(matches, perspective);
+
+    for (let sellIndex = 0; sellIndex < SELL_PRICE_MICROS.length; sellIndex += 1) {
+      const sellPriceMicros = SELL_PRICE_MICROS[sellIndex];
+      for (let buyIndex = 0; buyIndex < BUY_PRICE_MICROS.length; buyIndex += 1) {
+        const buyPriceMicros = BUY_PRICE_MICROS[buyIndex];
+        const cellIndex = sellIndex * BUY_PRICE_MICROS.length + buyIndex;
+        addCell(matrix, cellIndex, simulateBacktestCellWithNormalizedMatches({
+          buyPriceMicros,
+          cutoffMinutes,
+          interval: effectiveInterval,
+          market,
+          normalizedMatches,
+          perspective,
+          sellPriceMicros,
+          sharesPerMarket,
+        }));
+      }
+    }
+  }
+
+  return roundMatrix(matrix);
+}
+
+export function serializeBacktestMatrix(matrix) {
+  return JSON.stringify({
+    axes: {
+      buyPrices: BUY_PRICE_LABELS,
+      sellPrices: SELL_PRICE_LABELS,
+    },
+    matrix,
+    version: 1,
+  });
+}
+
+export function parseBacktestMatrixPayload(value) {
+  const parsed = typeof value === "string" ? JSON.parse(value) : value;
+  return parsed?.matrix || parsed;
+}
+
+export function summarizeBacktestMatrix(matrix) {
+  const pnl = matrix?.pnl || [];
+  const cost = matrix?.cost || [];
+  const payout = matrix?.payout || [];
+  return {
+    bestPnl: pnl.length ? Math.max(...pnl) : 0,
+    cells: pnl.length,
+    cost: Number(cost.reduce((sum, value) => sum + Number(value || 0), 0).toFixed(6)),
+    payout: Number(payout.reduce((sum, value) => sum + Number(value || 0), 0).toFixed(6)),
+    worstPnl: pnl.length ? Math.min(...pnl) : 0,
+  };
+}

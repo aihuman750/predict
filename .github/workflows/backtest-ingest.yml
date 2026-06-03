@@ -1,0 +1,50 @@
+name: Backtest Ingestion
+
+on:
+  schedule:
+    - cron: "25 2 * * *"
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "UTC start day, YYYY-MM-DD"
+        required: false
+      end:
+        description: "UTC end day, YYYY-MM-DD"
+        required: false
+      intervals:
+        description: "Comma-separated intervals"
+        default: "1h,15m,5m"
+        required: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Ingest backtest data
+        env:
+          BACKTEST_D1_DATABASE_ID: ${{ secrets.BACKTEST_D1_DATABASE_ID }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PREDICT_API_KEY: ${{ secrets.PREDICT_API_KEY }}
+        run: |
+          if [ -n "${{ github.event.inputs.start }}" ] && [ -n "${{ github.event.inputs.end }}" ]; then
+            node scripts/backtest-ingest.mjs \
+              --start "${{ github.event.inputs.start }}" \
+              --end "${{ github.event.inputs.end }}" \
+              --intervals "${{ github.event.inputs.intervals || '1h,15m,5m' }}"
+          else
+            YESTERDAY="$(date -u -d 'yesterday' +%F)"
+            node scripts/backtest-ingest.mjs \
+              --day "$YESTERDAY" \
+              --intervals "${{ github.event.inputs.intervals || '1h,15m,5m' }}"
+          fi

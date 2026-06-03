@@ -72,7 +72,7 @@ test("snapshotMarkets stores latest matched prices by favorite key", () => {
   });
 });
 
-test("buildReportMarkdown renders price and progress tables", () => {
+test("buildReportMarkdown renders price and market-impact brief tables", () => {
   const markdown = buildReportMarkdown({
     dateLabel: "2026-05-19 10:00",
     priceRows: [
@@ -87,11 +87,22 @@ test("buildReportMarkdown renders price and progress tables", () => {
         status: "active",
       },
     ],
-    progressRows: [
+    impactRows: [
       {
         key: "nexus",
         title: favorite.title,
-        progress: "Nexus announced its TGE date.",
+        information: "Nexus announced its TGE date.",
+        impact: "偏 Yes",
+        strength: "高",
+        confidence: "高",
+        sources: [
+          {
+            title: "Nexus official TGE update",
+            url: "https://example.com/nexus-tge",
+            publishedAt: "2026-05-19 09:30",
+            source: "Nexus Blog",
+          },
+        ],
       },
     ],
   });
@@ -99,5 +110,8 @@ test("buildReportMarkdown renders price and progress tables", () => {
   assert.match(markdown, /Predict 收藏市场日报/);
   assert.match(markdown, /\\| 市场 \\| Yes 最新 \\| Yes 变化 \\| No 最新 \\| No 变化 \\|/);
   assert.match(markdown, /Nexus FDV above \$50M one day after launch\?/);
+  assert.match(markdown, /### 2\. 价格影响简报/);
+  assert.match(markdown, /\\| 市场 \\| 关键信息 \\| 潜在影响 \\| 强度 \\| 置信度 \\| 来源 \\|/);
   assert.match(markdown, /Nexus announced its TGE date\./);
+  assert.match(markdown, /\[Nexus Blog\]\(https:\/\/example\.com\/nexus-tge\)/);
 });

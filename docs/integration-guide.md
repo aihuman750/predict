@@ -22,7 +22,7 @@ Expected response:
 
 ## List Favorites
 
-Production currently runs with `SITE_ACCESS_MODE = "public"`, so API reads do not require a site session cookie. If private mode is restored, include the `pa_session` cookie from `/api/site/login`.
+Production currently runs with `SITE_ACCESS_MODE = "public"`, so normal market and favorite reads do not require a site session cookie. Wallet and Predict auth APIs still require a private `pa_session` because they expose wallet identifiers and JWT-backed account data.
 
 ```bash
 curl --fail --silent \
@@ -79,6 +79,82 @@ Response shape:
 
 The returned `favorites` array is the complete post-write list.
 
+## BTC Strategy Backtest
+
+Backtest reads are public and do not require a site session. They only read D1 precomputed matrices and do not expose the Predict API key.
+
+### Metadata
+
+```bash
+curl --fail --silent \
+  https://predict-favorites.aihuman750.workers.dev/api/backtest/meta
+```
+
+Response shape:
+
+```json
+{
+  "coverage": {
+    "start": "2026-05-01",
+    "end": "2026-06-01",
+    "matrixCount": 9600
+  },
+  "intervals": [
+    { "interval": "1h", "cutoffMax": 60 },
+    { "interval": "15m", "cutoffMax": 15 },
+    { "interval": "5m", "cutoffMax": 5 }
+  ],
+  "axes": {
+    "buyPrices": ["0.01", "0.02"],
+    "sellPrices": ["0.01", "0.02", "HOLD_EXPIRY"]
+  }
+}
+```
+
+### Heatmap
+
+```bash
+curl --fail --silent \
+  'https://predict-favorites.aihuman750.workers.dev/api/backtest/heatmap?start=2026-05-01&end=2026-06-01&intervals=1h,15m,5m&cutoff=10'
+```
+
+`start` and `end` are UTC dates. `cutoff` must be a positive integer. If `cutoff` is larger than an interval duration, the Worker reads that interval's maximum cutoff matrix, for example `cutoff=10` uses the `5m` matrix at cutoff `5`.
+
+Response shape:
+
+```json
+{
+  "axes": {
+    "buyPrices": ["0.01"],
+    "sellPrices": ["0.01", "HOLD_EXPIRY"]
+  },
+  "yes": {
+    "pnl": [12.34],
+    "cost": [5],
+    "payout": [17.34],
+    "buyShares": [100],
+    "sellShares": [60],
+    "settlementShares": [40]
+  },
+  "no": {
+    "pnl": [-3],
+    "cost": [5],
+    "payout": [2],
+    "buyShares": [100],
+    "sellShares": [20],
+    "settlementShares": [0]
+  },
+  "summary": {
+    "start": "2026-05-01",
+    "end": "2026-06-01",
+    "cutoff": 10,
+    "intervals": ["1h", "15m", "5m"],
+    "normalizedCutoffs": { "1h": 10, "15m": 10, "5m": 5 },
+    "dataRows": 372
+  }
+}
+```
+
 ## Remove a Favorite
 
 ```bash
@@ -112,15 +188,69 @@ Response shape:
 
 The web UI can also call this endpoint from the public site. Private mode requires a valid site session.
 
+Report content:
+
+- `价格变动`: latest Yes/No prices and deltas from the previous KV snapshot.
+- `价格影响简报`: GPT web-search brief for each favorite market. The Worker sends GPT the market title and fixed market summary, then asks for source-backed information that could affect price. If `OPENAI_API_KEY` is missing or OpenAI fails, this section falls back to a clear status row for each market while the price table still sends.
+
+## Points Monitor
+
+List the top weekly points accounts:
+
+```bash
+curl --fail --silent \
+  https://predict-favorites.aihuman750.workers.dev/api/points/leaderboard
+```
+
+Response shape:
+
+```json
+{
+  "fetchedAt": "2026-06-02T06:30:00.000Z",
+  "source": "predict_graphql",
+  "stale": false,
+  "count": 200,
+  "windows": {
+    "lastWeek": { "weekNumber": 23, "label": "第23周 · 2026-05-21 - 2026-05-27" },
+    "thisWeek": { "weekNumber": 24, "label": "第24周 · 2026-05-28 - 2026-06-03" }
+  },
+  "accounts": [
+    {
+      "rank": 1,
+      "allTimeRank": 6,
+      "name": "Zzzz-",
+      "address": "0x0985C11d4fF264ad1cA59E6a1B0AF9c9BA222990",
+      "positionsValueUsd": 541460.85,
+      "pnlUsd": 26956.04,
+      "volumeUsd": 20890272.77,
+      "lastWeekPoints": 305580.04
+    }
+  ]
+}
+```
+
+`rank` is the locally sorted weekly-points rank. `allTimeRank` preserves Predict's default all-time leaderboard rank.
+
+Read one account detail:
+
+```bash
+curl --fail --silent \
+  https://predict-favorites.aihuman750.workers.dev/api/points/accounts/0x402582D54b7Bd3A44b57A6A0b4ac60c0BE1af608
+```
+
+The detail response includes `positions`, `lastWeek`, and `thisWeek`. Each period includes raw `trades`, `marketGroups`, and a generated `strategy` string. Trade details come from KV cache first; if missing, the Worker falls back to public BNB Chain Predict exchange logs.
+
 ## Error Responses
 
 | Status | Error | Meaning |
 | --- | --- | --- |
 | `400` | `invalid_market` | The request body did not contain a usable `market`. |
-| `401` | `auth_required` | Private mode is active and a site session cookie is required. |
+| `401` | `auth_required` | Private mode is active, or a wallet/Predict auth API was called without a private site session. |
 | `403` | `origin_not_allowed` | Browser origin or report token is not allowed. |
 | `404` | `not_found` | Route does not exist. |
-| `500` | `report_failed` | Report generation or Feishu delivery failed. |
+| `500` | `report_failed` | Rewards fetch, report generation, or Feishu delivery failed. OpenAI impact-brief failures are downgraded into fallback report rows. |
+| `500` | `points_leaderboard_failed` | Predict GraphQL leaderboard fetch failed and no usable cache exists. |
+| `500` | `points_account_failed` | Points account positions or trade cache/log retrieval failed. |
 | `500` | `wallet_summary_failed` | Wallet summary fetch or auto-favorite merge failed. |
 
 ## Favorite Key Rules

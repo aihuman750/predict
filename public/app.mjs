@@ -25,7 +25,7 @@ const expireOptions = [
 const WORKER_ORIGIN = "https://predict-favorites.aihuman750.workers.dev";
 const FAVORITES_API_BASE = window.PREDICT_FAVORITES_API || (window.location.origin === WORKER_ORIGIN ? "" : WORKER_ORIGIN);
 
-const views = new Set(["markets", "favorites", "wallets"]);
+const views = new Set(["markets", "favorites", "wallets", "points", "backtest"]);
 const viewMeta = {
   markets: {
     label: "积分市场",
@@ -41,6 +41,16 @@ const viewMeta = {
     label: "钱包监控",
     subtitle: "监控 Predict 钱包持仓，并自动收藏持仓相关市场。",
     title: "钱包监控",
+  },
+  points: {
+    label: "积分监控",
+    subtitle: "跟踪上周积分榜前 200 名账号、持仓、成交明细和策略特征。",
+    title: "积分监控",
+  },
+  backtest: {
+    label: "策略回测",
+    subtitle: "基于真实历史成交，按日期、市场周期和买入截止时间聚合策略收益矩阵。",
+    title: "策略回测",
   },
 };
 
@@ -73,16 +83,46 @@ const state = {
   ownOrdersError: "",
   ownOrdersLoading: false,
   ownOrdersMessage: "",
+  points: {
+    accounts: [],
+    detail: null,
+    detailError: "",
+    detailLoading: false,
+    error: "",
+    fetchedAt: "",
+    loading: false,
+    selectedAddress: readPointsAddress(),
+    stale: false,
+    windows: null,
+  },
+  backtest: {
+    cutoffMinutes: 10,
+    endIndex: 0,
+    error: "",
+    heatmap: null,
+    intervals: new Set(["1h", "15m", "5m"]),
+    loading: false,
+    meta: null,
+    startIndex: 0,
+  },
 };
 
 const ORDERBOOK_PREFETCH_DELAY_MS = 325;
 let orderbookQueue = [];
 let orderbookQueueRunning = false;
 let orderbookQueueToken = 0;
+let backtestLoadTimer = 0;
 
 function readView() {
   const hash = window.location.hash.replace(/^#\/?/, "");
+  if (hash.startsWith("points/")) return "points";
   return views.has(hash) ? hash : "markets";
+}
+
+function readPointsAddress() {
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  const match = hash.match(/^points\/([^/]+)$/);
+  return match ? normalizeWalletAddress(decodeURIComponent(match[1])) || "" : "";
 }
 
 function readExpireSetting() {
@@ -385,11 +425,14 @@ function renderPage(options = {}) {
             <div class="pa-sub">${meta.subtitle}</div>
           </div>
           ${state.view === "markets" ? `<button class="btn btn-sm" id="refreshBtn">刷新</button>` : ""}
+          ${state.view === "points" ? `<button class="btn btn-sm" id="pointsRefreshBtn" ${state.points.loading ? "disabled" : ""}>${state.points.loading ? "刷新中..." : "刷新榜单"}</button>` : ""}
         </div>
 
         ${state.view === "markets" ? renderMarketsPage(rows, duplicateCategories) : ""}
         ${state.view === "favorites" ? renderFavoritesSection() : ""}
         ${state.view === "wallets" ? renderWalletPage() : ""}
+        ${state.view === "points" ? renderPointsPage() : ""}
+        ${state.view === "backtest" ? renderBacktestPage() : ""}
       </div>
     </main>
     <footer class="pa-footer">
@@ -482,8 +525,297 @@ function formatUsdText(value) {
   return `$${number.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
 }
 
+function formatProfitText(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  const abs = Math.abs(number);
+  if (abs >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}m`;
+  if (abs >= 10_000) return `${(number / 1_000).toFixed(1)}k`;
+  if (abs >= 100) return number.toFixed(0);
+  return number.toFixed(2);
+}
+
+function formatBacktestMetric(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return number.toLocaleString("en-US", {
+    maximumFractionDigits: Math.abs(number) >= 100 ? 0 : 2,
+    minimumFractionDigits: 0,
+  });
+}
+
+function backtestDays() {
+  const coverage = state.backtest.meta?.coverage;
+  if (!coverage?.start || !coverage?.end) return [];
+  const days = [];
+  const date = new Date(`${coverage.start}T00:00:00.000Z`);
+  const end = new Date(`${coverage.end}T00:00:00.000Z`);
+  while (date <= end) {
+    days.push(date.toISOString().slice(0, 10));
+    date.setUTCDate(date.getUTCDate() + 1);
+  }
+  return days;
+}
+
+function backtestSelectedDays() {
+  const days = backtestDays();
+  if (!days.length) return { end: null, start: null };
+  const startIndex = Math.min(state.backtest.startIndex, state.backtest.endIndex);
+  const endIndex = Math.max(state.backtest.startIndex, state.backtest.endIndex);
+  return {
+    end: days[Math.min(endIndex, days.length - 1)],
+    start: days[Math.max(0, startIndex)],
+  };
+}
+
+function heatmapColor(value, scale) {
+  const number = Number(value) || 0;
+  const min = Number(scale.min);
+  const max = Number(scale.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return "background:var(--bg-3);color:var(--muted)";
+  const normalized = Math.max(0, Math.min(1, (number - min) / (max - min)));
+  const red = Math.round(34 + normalized * 205);
+  const green = Math.round(184 - normalized * 116);
+  const blue = Math.round(110 - normalized * 70);
+  const alpha = 0.22 + Math.abs(normalized - 0.5) * 0.9;
+  return `background:rgba(${red},${green},${blue},${alpha.toFixed(2)});color:${normalized > 0.72 ? "#fff" : "var(--ink)"}`;
+}
+
+function heatmapScale() {
+  const values = [
+    ...(state.backtest.heatmap?.yes?.pnl || []),
+    ...(state.backtest.heatmap?.no?.pnl || []),
+  ].map(Number).filter(Number.isFinite);
+  return {
+    max: values.length ? Math.max(...values) : 0,
+    min: values.length ? Math.min(...values) : 0,
+  };
+}
+
 function shortAddress(address) {
   return `${String(address).slice(0, 6)}...${String(address).slice(-4)}`;
+}
+
+function predictPortfolioUrl(address) {
+  return `https://predict.fun/portfolio/${encodeURIComponent(address)}`;
+}
+
+function renderPointsPage() {
+  if (state.points.selectedAddress) return renderPointsAccountDetail();
+  const accounts = state.points.accounts || [];
+  const windows = state.points.windows;
+  const status = state.points.error
+    ? `<span class="wallet-status error">${escapeHtml(state.points.error)}</span>`
+    : state.points.fetchedAt
+      ? `<span class="wallet-status">${state.points.stale ? "缓存数据" : "实时数据"} · ${escapeHtml(new Date(state.points.fetchedAt).toLocaleString("zh-CN", { hour12: false }))}</span>`
+      : "";
+
+  return `
+    <section class="pa-card stat-card">
+      <div class="stat-row">
+        ${statHtml("榜单账号", state.points.loading && !accounts.length ? "-" : formatNumber(accounts.length), "上周积分前 200")}
+        ${statHtml("积分周期", windows?.lastWeek?.label || "-", "Predict 周三至周二周期")}
+        ${statHtml("总持仓", accounts.length ? formatUsdText(accounts.reduce((sum, account) => sum + Number(account.positionsValueUsd || 0), 0)) : "-", "榜单账号当前持仓")}
+        ${statHtml("总成交量", accounts.length ? formatUsdText(accounts.reduce((sum, account) => sum + Number(account.volumeUsd || 0), 0)) : "-", "Predict 账号统计")}
+      </div>
+    </section>
+
+    <section class="pa-card table-card">
+      <div class="pa-card-head">
+        <div class="table-title-wrap">
+          <div class="pa-card-title">上周积分前 200</div>
+          <div class="pill mono">${accounts.length || 0} 个账号</div>
+          ${status}
+        </div>
+      </div>
+      ${
+        state.points.loading && !accounts.length
+          ? `<div class="favorite-empty muted">正在读取积分榜...</div>`
+          : state.points.error && !accounts.length
+            ? `<div class="favorite-empty muted">积分榜读取失败，请稍后重试。</div>`
+            : renderPointsTable(accounts)
+      }
+    </section>
+  `;
+}
+
+function renderPointsTable(accounts) {
+  if (!accounts.length) return `<div class="favorite-empty muted">暂无积分榜数据。</div>`;
+
+  return `
+    <div class="table-scroll points-table-scroll">
+      <table class="pa-table points-table">
+        <thead>
+          <tr>
+            <th style="width:64px">排名</th>
+            <th>账号</th>
+            <th class="num" style="width:128px">持仓金额</th>
+            <th class="num" style="width:128px">盈亏金额</th>
+            <th class="num" style="width:132px">总成交量</th>
+            <th class="num" style="width:132px">上周积分</th>
+            <th style="width:164px">钱包地址</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${accounts.map(renderPointsAccountRow).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderPointsAccountRow(account) {
+  const address = account.address || "";
+  return `
+    <tr class="points-account-row" data-points-account="${escapeHtml(address)}" tabindex="0">
+      <td class="mono">#${formatNumber(account.rank)}</td>
+      <td>
+        <div class="market-name">${escapeHtml(account.name || "未命名账号")}</div>
+        <div class="market-meta">${formatNumber(account.marketsCount)} 个市场 · ${formatNumber(account.positionCount)} 个持仓</div>
+      </td>
+      <td class="num mono">${formatUsdText(account.positionsValueUsd)}</td>
+      <td class="num mono ${Number(account.pnlUsd) >= 0 ? "profit" : "loss"}">${formatUsdText(account.pnlUsd)}</td>
+      <td class="num mono">${formatUsdText(account.volumeUsd)}</td>
+      <td class="num mono accent">${formatNumber(account.lastWeekPoints, 0)}</td>
+      <td class="mono">
+        <a href="#points/${encodeURIComponent(address)}" title="${escapeHtml(address)}">${escapeHtml(shortAddress(address))}</a>
+      </td>
+    </tr>
+  `;
+}
+
+function renderPointsAccountDetail() {
+  const detail = state.points.detail;
+  const address = state.points.selectedAddress;
+  const title = detail?.address || address;
+
+  return `
+    <section class="pa-card wallet-card points-detail-head">
+      <div class="pa-card-head wallet-address-head">
+        <div>
+          <div class="wallet-address mono">${escapeHtml(shortAddress(title))}</div>
+          <div class="wallet-sub muted">${detail?.windows?.lastWeek?.label || state.points.windows?.lastWeek?.label || "-"} 上周积分周期</div>
+        </div>
+        <div class="points-detail-actions">
+          <a class="btn btn-secondary btn-sm" href="#points">返回榜单</a>
+          <a class="btn btn-sm" href="${escapeHtml(predictPortfolioUrl(title))}" target="_blank" rel="noopener noreferrer">打开组合页</a>
+        </div>
+      </div>
+      ${
+        state.points.detailError
+          ? `<div class="wallet-error">${escapeHtml(state.points.detailError)}</div>`
+          : state.points.detailLoading && !detail
+            ? `<div class="favorite-empty muted">正在读取账号详情和交易缓存...</div>`
+            : ""
+      }
+    </section>
+
+    ${detail ? `
+      <section class="pa-card stat-card">
+        <div class="stat-row">
+          ${statHtml("持仓明细", formatNumber(detail.positions.length), "当前公开持仓")}
+          ${statHtml("上周成交", formatNumber(detail.lastWeek.trades.length), detail.windows.lastWeek.label)}
+          ${statHtml("本周成交", formatNumber(detail.thisWeek.trades.length), detail.windows.thisWeek.label)}
+          ${statHtml("数据源", escapeHtml(detail.tradeSource || "cache"), detail.tradesFetchedAt ? `成交缓存 ${escapeHtml(new Date(detail.tradesFetchedAt).toLocaleString("zh-CN", { hour12: false }))}` : "")}
+        </div>
+      </section>
+
+      <section class="pa-card wallet-card">
+        <div class="pa-card-head wallet-head">
+          <div>
+            <div class="pa-card-title">策略说明</div>
+            <div class="wallet-sub muted">基于上周成交方向、价格、合约类型和事件集中度生成。</div>
+          </div>
+        </div>
+        <div class="points-strategy">${escapeHtml(detail.lastWeek.strategy)}</div>
+      </section>
+
+      <section class="pa-card wallet-card">
+        <div class="pa-card-head wallet-head">
+          <div>
+            <div class="pa-card-title">持仓明细</div>
+            <div class="wallet-sub muted">同一事件的不同选项在交易分析中会按市场 ID 聚合。</div>
+          </div>
+        </div>
+        ${renderPointsPositions(detail.positions)}
+      </section>
+
+      ${renderPointsTradeSection("上周交易记录", detail.windows.lastWeek.label, detail.lastWeek)}
+      ${renderPointsTradeSection("本周交易记录", detail.windows.thisWeek.label, detail.thisWeek)}
+    ` : ""}
+  `;
+}
+
+function renderPointsPositions(positions) {
+  if (!positions.length) return `<div class="favorite-empty muted">该账号暂无公开持仓。</div>`;
+  return `<div class="wallet-position-list">${positions.map((position) => `
+    <div class="wallet-position">
+      <div class="wallet-position-main">
+        <div class="market-name">${escapeHtml(position.marketQuestion || position.marketTitle || "-")}</div>
+        <div class="market-meta">#${escapeHtml(position.marketId)} · ${escapeHtml(position.outcomeName)}</div>
+      </div>
+      <div class="wallet-position-metrics">
+        <span>数量 ${formatNumber(position.shares, 2)}</span>
+        <span>价值 ${formatUsdText(position.valueUsd)}</span>
+        <span>均价 ${formatUsdText(position.averageBuyPriceUsd)}</span>
+        <span>PnL ${formatUsdText(position.pnlUsd)}</span>
+      </div>
+    </div>
+  `).join("")}</div>`;
+}
+
+function renderPointsTradeSection(title, label, period) {
+  const trades = period.trades || [];
+  return `
+    <section class="pa-card wallet-card">
+      <div class="pa-card-head wallet-head">
+        <div>
+          <div class="pa-card-title">${escapeHtml(title)}</div>
+          <div class="wallet-sub muted">${escapeHtml(label)} · ${formatNumber(trades.length)} 笔成交</div>
+        </div>
+      </div>
+      ${renderPointsMarketGroups(period.marketGroups || [])}
+      ${renderPointsTrades(trades)}
+    </section>
+  `;
+}
+
+function renderPointsMarketGroups(groups) {
+  if (!groups.length) return `<div class="favorite-empty muted">暂无可聚合的事件成交。</div>`;
+  return `
+    <div class="points-market-groups">
+      ${groups.slice(0, 8).map((group) => `
+        <div class="points-market-group">
+          <div>
+            <div class="market-name">${escapeHtml(group.marketTitle || "-")}</div>
+            <div class="market-meta">#${escapeHtml(group.marketId || "-")} · ${formatNumber(group.tradeCount)} 笔 · ${formatNumber(group.transactionCount)} tx</div>
+          </div>
+          <div class="points-outcomes">
+            ${(group.outcomes || []).map((outcome) => `<span>${escapeHtml(outcome.name)} ${formatNumber(outcome.tradeCount)}</span>`).join("")}
+          </div>
+          <div class="mono">${formatUsdText(group.estimatedNotionalUsd)}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderPointsTrades(trades) {
+  if (!trades.length) return "";
+  return `
+    <div class="points-trade-list">
+      ${trades.slice(0, 80).map((trade) => `
+        <div class="points-trade-row">
+          <span class="mono">${escapeHtml(trade.timestamp ? trade.timestamp.replace("T", " ").slice(0, 19) : "-")}</span>
+          <span>${escapeHtml(trade.marketTitle || "-")}</span>
+          <span>${escapeHtml(trade.outcomeName || "-")}</span>
+          <span class="mono">${escapeHtml(trade.sideEstimate || "-")}</span>
+          <span class="mono">${formatUsdText(trade.estimatedNotionalUsd)}</span>
+          <span class="mono">${trade.estimatedPrice == null ? "-" : formatNumber(trade.estimatedPrice, 3)}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }
 
 function renderWalletPage() {
@@ -651,6 +983,113 @@ function renderWalletPosition(position) {
         <span>PnL ${formatUsdText(position.pnlUsd)}</span>
       </div>
     </div>
+  `;
+}
+
+function renderBacktestPage() {
+  const days = backtestDays();
+  const selected = backtestSelectedDays();
+  const availableIntervals = state.backtest.meta?.intervals?.map((row) => row.interval) || ["1h", "15m", "5m"];
+  const selectedIntervals = [...state.backtest.intervals];
+  const summary = state.backtest.heatmap?.summary;
+
+  return `
+    <section class="backtest-toolbar">
+      <div class="backtest-filter">
+        <div class="filter-label">回测日期</div>
+        ${
+          days.length
+            ? `
+              <div class="range-pair">
+                <input id="backtestStartRange" type="range" min="0" max="${days.length - 1}" value="${state.backtest.startIndex}" />
+                <input id="backtestEndRange" type="range" min="0" max="${days.length - 1}" value="${state.backtest.endIndex}" />
+              </div>
+              <div class="range-labels mono">
+                <span>${escapeHtml(selected.start || "-")}</span>
+                <span>${escapeHtml(selected.end || "-")}</span>
+              </div>
+            `
+            : `<div class="muted">暂无 D1 回测覆盖日期。</div>`
+        }
+      </div>
+      <label class="backtest-filter compact">
+        <span class="filter-label">买入截止分钟</span>
+        <input class="inp" id="backtestCutoffInput" type="number" min="1" step="1" value="${escapeHtml(state.backtest.cutoffMinutes)}" />
+      </label>
+      <div class="backtest-filter">
+        <div class="filter-label">市场</div>
+        <div class="seg interval-seg">
+          ${["1h", "15m", "5m"].map((interval) => `
+            <button
+              class="seg-item ${state.backtest.intervals.has(interval) ? "active" : ""}"
+              data-backtest-interval="${interval}"
+              ${availableIntervals.includes(interval) ? "" : "disabled"}
+            >${interval}</button>
+          `).join("")}
+        </div>
+      </div>
+      <button class="btn btn-sm" id="backtestRefreshBtn" ${state.backtest.loading ? "disabled" : ""}>${state.backtest.loading ? "计算中..." : "刷新"}</button>
+    </section>
+
+    <section class="backtest-summary">
+      ${statHtml("时间范围", selected.start && selected.end ? `${selected.start}<span> 至 </span>${selected.end}` : "-", "UTC 日期")}
+      ${statHtml("市场周期", selectedIntervals.length ? selectedIntervals.join(" / ") : "-", summary?.normalizedCutoffs ? `实际 cutoff ${Object.entries(summary.normalizedCutoffs).map(([key, value]) => `${key}:${value}`).join(" · ")}` : "")}
+      ${statHtml("Yes 最优格", summary ? formatBacktestMetric(summary.yes.bestPnl) : "-", "累计利润 U", "accent")}
+      ${statHtml("No 最优格", summary ? formatBacktestMetric(summary.no.bestPnl) : "-", "累计利润 U", "accent")}
+    </section>
+
+    ${state.backtest.error ? `<div class="backtest-error">${escapeHtml(state.backtest.error)}</div>` : ""}
+    ${state.backtest.loading && !state.backtest.heatmap ? `<div class="favorite-empty muted">正在读取回测矩阵...</div>` : ""}
+    ${
+      state.backtest.heatmap
+        ? `
+          <section class="heatmap-pair">
+            ${renderBacktestHeatmap("Yes 视角", state.backtest.heatmap.yes)}
+            ${renderBacktestHeatmap("No 视角", state.backtest.heatmap.no)}
+          </section>
+        `
+        : ""
+    }
+  `;
+}
+
+function renderBacktestHeatmap(title, matrix) {
+  const axes = state.backtest.heatmap?.axes || state.backtest.meta?.axes || { buyPrices: [], sellPrices: [] };
+  const buyPrices = axes.buyPrices || [];
+  const sellPrices = axes.sellPrices || [];
+  const scale = heatmapScale();
+  const cells = matrix?.pnl || [];
+
+  return `
+    <section class="heatmap-panel">
+      <div class="heatmap-head">
+        <div class="pa-card-title">${escapeHtml(title)}</div>
+        <div class="pill mono">${formatBacktestMetric(Math.max(...cells.map(Number).filter(Number.isFinite), 0))} U max</div>
+      </div>
+      <div class="heatmap-scroll">
+        <div class="heatmap-grid" style="--heatmap-cols:${buyPrices.length}">
+          <div class="heatmap-axis corner">卖出\\买入</div>
+          ${buyPrices.map((price) => `<div class="heatmap-axis top">${escapeHtml(price)}</div>`).join("")}
+          ${sellPrices.map((sellPrice, sellIndex) => `
+            <div class="heatmap-axis side">${escapeHtml(sellPrice === "HOLD_EXPIRY" ? "持有到期" : sellPrice)}</div>
+            ${buyPrices.map((buyPrice, buyIndex) => {
+              const cellIndex = sellIndex * buyPrices.length + buyIndex;
+              const pnl = Number(matrix?.pnl?.[cellIndex] || 0);
+              const titleText = [
+                `买入 ${buyPrice}`,
+                `卖出 ${sellPrice === "HOLD_EXPIRY" ? "持有到期" : sellPrice}`,
+                `成本 ${formatBacktestMetric(matrix?.cost?.[cellIndex] || 0)}U`,
+                `回款 ${formatBacktestMetric(matrix?.payout?.[cellIndex] || 0)}U`,
+                `买入份额 ${formatBacktestMetric(matrix?.buyShares?.[cellIndex] || 0)}`,
+                `卖出份额 ${formatBacktestMetric(matrix?.sellShares?.[cellIndex] || 0)}`,
+                `利润 ${formatBacktestMetric(pnl)}U`,
+              ].join(" · ");
+              return `<div class="heatmap-cell" style="${heatmapColor(pnl, scale)}" title="${escapeHtml(titleText)}">${escapeHtml(formatProfitText(pnl))}</div>`;
+            }).join("")}
+          `).join("")}
+        </div>
+      </div>
+    </section>
   `;
 }
 
@@ -833,9 +1272,42 @@ function bindEvents() {
   document.querySelector("#refreshOwnOrdersBtn")?.addEventListener("click", () => loadOwnOrders({ preserveScroll: true }));
   document.querySelector("#sendReportBtn")?.addEventListener("click", sendLatestReport);
   document.querySelector("#themeBtn")?.addEventListener("click", toggleTheme);
+  document.querySelector("#backtestRefreshBtn")?.addEventListener("click", () => loadBacktestHeatmap({ preserveScroll: true }));
+  document.querySelector("#pointsRefreshBtn")?.addEventListener("click", () => loadPointsLeaderboard({ preserveScroll: true }));
+  document.querySelector("#backtestCutoffInput")?.addEventListener("input", (event) => {
+    const parsed = Math.floor(Number(event.target.value));
+    state.backtest.cutoffMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+    scheduleBacktestHeatmapLoad();
+    renderPage({ preserveFocus: true, preserveScroll: true });
+  });
+  document.querySelector("#backtestStartRange")?.addEventListener("input", (event) => {
+    const value = Number(event.target.value);
+    state.backtest.startIndex = Math.min(value, state.backtest.endIndex);
+    scheduleBacktestHeatmapLoad();
+    renderPage({ preserveFocus: true, preserveScroll: true });
+  });
+  document.querySelector("#backtestEndRange")?.addEventListener("input", (event) => {
+    const value = Number(event.target.value);
+    state.backtest.endIndex = Math.max(value, state.backtest.startIndex);
+    scheduleBacktestHeatmapLoad();
+    renderPage({ preserveFocus: true, preserveScroll: true });
+  });
 
   for (const button of document.querySelectorAll("[data-accent]")) {
     button.addEventListener("click", () => setAccent(button.dataset.accent));
+  }
+
+  for (const button of document.querySelectorAll("[data-backtest-interval]")) {
+    button.addEventListener("click", () => {
+      const interval = button.dataset.backtestInterval;
+      if (state.backtest.intervals.has(interval)) {
+        state.backtest.intervals.delete(interval);
+      } else {
+        state.backtest.intervals.add(interval);
+      }
+      scheduleBacktestHeatmapLoad();
+      renderPage({ preserveScroll: true });
+    });
   }
 
   for (const button of document.querySelectorAll("[data-sort]")) {
@@ -894,6 +1366,18 @@ function bindEvents() {
 
   for (const button of document.querySelectorAll("[data-wallet-connect]")) {
     button.addEventListener("click", () => connectPredictWallet(button.dataset.walletConnect));
+  }
+
+  for (const row of document.querySelectorAll("[data-points-account]")) {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest("a, button, input, select, textarea")) return;
+      window.location.hash = `points/${encodeURIComponent(row.dataset.pointsAccount)}`;
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      window.location.hash = `points/${encodeURIComponent(row.dataset.pointsAccount)}`;
+    });
   }
 }
 
@@ -1029,6 +1513,10 @@ function rewardsEndpoint() {
 
 function favoritesEndpoint(path = "") {
   return `${FAVORITES_API_BASE}${path}`;
+}
+
+function backtestEndpoint(path = "") {
+  return favoritesEndpoint(path);
 }
 
 function orderbookEndpoint(id) {
@@ -1273,6 +1761,124 @@ async function loadOwnOrders({ preserveScroll = false, renderLoading = true } = 
   }
 }
 
+function scheduleBacktestHeatmapLoad() {
+  clearTimeout(backtestLoadTimer);
+  backtestLoadTimer = setTimeout(() => {
+    loadBacktestHeatmap({ preserveScroll: true });
+  }, 275);
+}
+
+async function loadBacktestMeta({ render = true } = {}) {
+  if (state.backtest.meta) {
+    if (!state.backtest.heatmap && !state.backtest.loading) loadBacktestHeatmap({ preserveScroll: true });
+    return;
+  }
+
+  state.backtest.loading = true;
+  state.backtest.error = "";
+  if (render) renderPage();
+
+  try {
+    const response = await fetch(backtestEndpoint("/api/backtest/meta"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.backtest.meta = payload;
+    const days = backtestDays();
+    state.backtest.startIndex = 0;
+    state.backtest.endIndex = Math.max(0, days.length - 1);
+    state.backtest.error = "";
+    if (days.length) {
+      await loadBacktestHeatmap({ preserveScroll: true, renderLoading: false });
+    }
+  } catch (error) {
+    console.error(error);
+    state.backtest.error = "回测元数据读取失败";
+  } finally {
+    state.backtest.loading = false;
+    if (render) renderPage({ preserveScroll: true });
+  }
+}
+
+async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = true } = {}) {
+  const selected = backtestSelectedDays();
+  const intervals = [...state.backtest.intervals];
+  if (!state.backtest.meta || !selected.start || !selected.end) return;
+  if (!intervals.length) {
+    state.backtest.error = "请至少选择一个市场周期";
+    renderPage({ preserveScroll });
+    return;
+  }
+
+  state.backtest.loading = true;
+  state.backtest.error = "";
+  if (renderLoading) renderPage({ preserveScroll });
+
+  try {
+    const params = new URLSearchParams({
+      cutoff: String(state.backtest.cutoffMinutes),
+      end: selected.end,
+      intervals: intervals.join(","),
+      start: selected.start,
+    });
+    const response = await fetch(backtestEndpoint(`/api/backtest/heatmap?${params}`), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.backtest.heatmap = await response.json();
+    state.backtest.error = "";
+  } catch (error) {
+    console.error(error);
+    state.backtest.error = "回测矩阵读取失败";
+  } finally {
+    state.backtest.loading = false;
+    renderPage({ preserveScroll });
+  }
+}
+
+async function loadPointsLeaderboard({ preserveScroll = false, renderLoading = true } = {}) {
+  state.points.loading = true;
+  state.points.error = "";
+  if (renderLoading) renderPage({ preserveScroll });
+
+  try {
+    const response = await fetch(favoritesEndpoint("/api/points/leaderboard"), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    state.points.accounts = Array.isArray(payload.accounts) ? payload.accounts : [];
+    state.points.fetchedAt = payload.fetchedAt || "";
+    state.points.stale = Boolean(payload.stale);
+    state.points.windows = payload.windows || null;
+    state.points.error = "";
+  } catch (error) {
+    console.error(error);
+    state.points.error = "积分榜读取失败";
+  } finally {
+    state.points.loading = false;
+    renderPage({ preserveScroll });
+  }
+}
+
+async function loadPointsAccount(address, { preserveScroll = false, renderLoading = true } = {}) {
+  const normalized = normalizeWalletAddress(address);
+  if (!normalized) return;
+  state.points.selectedAddress = normalized;
+  state.points.detailLoading = true;
+  state.points.detailError = "";
+  if (state.points.detail?.address !== normalized) state.points.detail = null;
+  if (renderLoading) renderPage({ preserveScroll });
+
+  try {
+    const response = await fetch(favoritesEndpoint(`/api/points/accounts/${encodeURIComponent(normalized)}`), { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.points.detail = await response.json();
+    state.points.detailError = "";
+  } catch (error) {
+    console.error(error);
+    state.points.detailError = "账号详情读取失败，成交缓存或链上数据暂不可用";
+  } finally {
+    state.points.detailLoading = false;
+    renderPage({ preserveScroll });
+  }
+}
+
 async function addWallet() {
   const address = normalizeWalletAddress(state.walletInput);
   if (!address) {
@@ -1394,15 +2000,30 @@ loadPredictAuthStatus({ render: false }).then(() => {
     loadWalletSummary();
     if (state.ownOrdersAuth.hasToken) loadOwnOrders();
   }
+  if (state.view === "points") {
+    loadPointsLeaderboard();
+    if (state.points.selectedAddress) loadPointsAccount(state.points.selectedAddress);
+  }
+  if (state.view === "backtest") {
+    loadBacktestMeta();
+  }
 });
 window.addEventListener("hashchange", () => {
   state.view = readView();
+  state.points.selectedAddress = readPointsAddress();
   renderPage({ preserveScroll: true });
   if (state.view === "wallets") {
     loadPredictAuthStatus({ render: false }).then(() => {
       loadWalletSummary({ preserveScroll: true });
       if (state.ownOrdersAuth.hasToken) loadOwnOrders({ preserveScroll: true });
     });
+  }
+  if (state.view === "points") {
+    if (!state.points.accounts.length) loadPointsLeaderboard({ preserveScroll: true });
+    if (state.points.selectedAddress) loadPointsAccount(state.points.selectedAddress, { preserveScroll: true });
+  }
+  if (state.view === "backtest") {
+    loadBacktestMeta();
   }
 });
 setInterval(updateClock, 1000);

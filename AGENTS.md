@@ -12,7 +12,7 @@ This repository powers the Predict rewards monitor at https://predict-favorites.
 - Activate Points orderbook quantity totals use Predict `/v1/markets/{id}/orderbook` through the Worker route `/api/markets/:id/orderbook`; frontend filtering helpers live in `public/orderbook-core.mjs`.
 - Wallet monitoring is handled by Worker wallet routes and shared helpers in `public/wallet-core.mjs`.
 - Self-wallet open orders are fetched through the Worker after Predict wallet signing stores an encrypted JWT in KV. The Worker calls Predict `/v1/account` after signing and stores the returned Predict account address when available.
-- Shared market and report helpers live in `public/rewards-core.mjs` and `scripts/report-core.mjs`.
+- Shared market and report helpers live in `public/rewards-core.mjs`, `scripts/report-core.mjs`, and `scripts/market-profile-core.mjs`.
 
 ## Important URLs
 
@@ -40,6 +40,8 @@ This repository powers the Predict rewards monitor at https://predict-favorites.
 - `GET /api/wallets/summary`
 - `GET /api/wallets/me/orders`
 
+Wallet and Predict auth APIs require a private `pa_session` even when `SITE_ACCESS_MODE = "public"` so real wallet identifiers and JWT-backed data are not exposed through public reads.
+
 Favorite data is stored in Cloudflare KV under `favorites:v1`. Report price snapshots are stored under `report:price-state:v1`.
 Monitored wallet addresses are stored under `wallets:v1`.
 The encrypted Predict JWT and Predict account metadata are stored under `predict:auth:v1`.
@@ -61,6 +63,7 @@ GitHub Secrets required for deployment and report sending:
 - `CLOUDFLARE_API_TOKEN`
 - `FEISHU_WEBHOOK`
 - `FEISHU_SECRET`
+- `OPENAI_API_KEY`
 - `PREDICT_API_KEY`
 - `REPORT_TOKEN`
 - `SITE_PASSWORD`
@@ -76,6 +79,7 @@ npm test
 node --check public/app.mjs
 node --check worker/index.mjs
 node --check scripts/report-core.mjs
+node --check scripts/market-profile-core.mjs
 node --check public/wallet-core.mjs
 git diff --check
 ```

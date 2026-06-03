@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "worker/**"
-      - "scripts/report-core.mjs"
+      - "scripts/**"
       - "public/**"
       - "wrangler.toml"
       - ".github/workflows/cloudflare-worker.yml"
@@ -30,12 +30,14 @@ jobs:
           printf '%s' "$FEISHU_SECRET" | npx wrangler@latest secret put FEISHU_SECRET
           printf '%s' "$REPORT_TOKEN" | npx wrangler@latest secret put REPORT_TOKEN
           printf '%s' "$PREDICT_API_KEY" | npx wrangler@latest secret put PREDICT_API_KEY
+          printf '%s' "$OPENAI_API_KEY" | npx wrangler@latest secret put OPENAI_API_KEY
           printf '%s' "$SITE_PASSWORD" | npx wrangler@latest secret put SITE_PASSWORD
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           FEISHU_SECRET: ${{ secrets.FEISHU_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PREDICT_API_KEY: ${{ secrets.PREDICT_API_KEY }}
           REPORT_TOKEN: ${{ secrets.REPORT_TOKEN }}
           SITE_PASSWORD: ${{ secrets.SITE_PASSWORD }}

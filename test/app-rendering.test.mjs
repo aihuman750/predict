@@ -37,3 +37,20 @@ test("orderbook quantities render as whole numbers", () => {
 test("index loads app script through a versioned URL", () => {
   assert.match(indexSource, /src="app\.mjs\?v=[0-9a-z.-]+"/);
 });
+
+test("app exposes the points monitor view and account detail renderer", () => {
+  assert.match(appSource, /const views = new Set\(\[[^\]]*"points"/);
+  assert.match(appSource, /label: "积分监控"/);
+  assert.match(appSource, /function renderPointsPage/);
+  assert.match(appSource, /function renderPointsAccountDetail/);
+  assert.match(appSource, /data-points-account=/);
+});
+
+test("app exposes the strategy backtest view and heatmap API wiring", () => {
+  assert.match(appSource, /backtest:\s*\{/);
+  assert.match(appSource, /label:\s*"策略回测"/);
+  assert.match(appSource, /renderBacktestPage/);
+  assert.match(appSource, /renderBacktestHeatmap/);
+  assert.match(appSource, /\/api\/backtest\/meta/);
+  assert.match(appSource, /\/api\/backtest\/heatmap/);
+});

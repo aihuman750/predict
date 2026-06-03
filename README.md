@@ -14,11 +14,12 @@ Production URLs:
 - Favorite star on every market row.
 - Favorite list with latest Yes/No prices.
 - Wallet monitor page for Predict wallet positions.
+- Points monitor page for the top 200 weekly points accounts, with portfolio stats, public positions, cached trade details, and strategy summaries.
 - Position markets from monitored wallets are automatically merged into favorites.
 - Wallet signing flow for the user's own Predict account, with authenticated open orders and Predict account-address detection through `/v1/account`.
 - Open-order markets are automatically merged into favorites.
 - Manual "推送最新报告" button that sends the current favorite-market report to Feishu.
-- Daily favorite-market report at 10:00 Asia/Shanghai via GitHub Actions calling the Worker report endpoint.
+- Daily favorite-market report at 10:00 Asia/Shanghai via GitHub Actions calling the Worker report endpoint. The report includes price changes plus a GPT web-search impact brief generated from fixed market summaries.
 
 ## Local Development
 
@@ -51,11 +52,11 @@ The local server serves `public/`, proxies `/api/markets/rewards` to PredAlpha w
 npm test
 ```
 
-The test suite covers rewards-table helpers, Activate Points orderbook filtering, wallet/order formatting, report markdown generation, Worker favorite APIs, public/private site access, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu and rewards responses.
+The test suite covers rewards-table helpers, Activate Points orderbook filtering, points-monitor normalization, wallet/order formatting, market-summary generation, report markdown generation, Worker favorite APIs, public/private site access, Predict auth routing, wallet monitoring, self-order monitoring, and Worker report sending with mocked Feishu, OpenAI, and rewards responses.
 
 ## Deployment
 
-Cloudflare Worker deploys the public site, favorite storage, wallet monitoring, authenticated open-order monitoring, and report sending.
+Cloudflare Worker deploys the public site, favorite storage, points monitoring, wallet monitoring, authenticated open-order monitoring, and report sending.
 
 - Workflow: `.github/workflows/cloudflare-worker.yml`
 - Worker config: `wrangler.toml`
@@ -66,6 +67,7 @@ Cloudflare Worker deploys the public site, favorite storage, wallet monitoring, 
 Worker vars:
 
 - `SITE_ACCESS_MODE = "public"` keeps the deployed site publicly accessible. Removing it or changing it to another value restores the password gate.
+- Wallet and Predict auth APIs still require a private `pa_session` in public mode so real wallet identifiers are not exposed through public reads.
 
 Daily Feishu report:
 
@@ -79,6 +81,7 @@ Required GitHub Secrets:
 - `CLOUDFLARE_API_TOKEN`
 - `FEISHU_WEBHOOK`
 - `FEISHU_SECRET`
+- `OPENAI_API_KEY`
 - `PREDICT_API_KEY`
 - `REPORT_TOKEN`
 - `SITE_PASSWORD`

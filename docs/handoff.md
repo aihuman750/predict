@@ -17,7 +17,7 @@ Implemented:
 - Search input keeps focus during continuous typing.
 - Favorite actions preserve scroll position.
 - Manual Feishu report button.
-- Daily 10:00 Asia/Shanghai Feishu report.
+- Daily 10:00 Asia/Shanghai Feishu report with price changes and GPT web-search impact brief.
 - Worker KV storage for favorites and price snapshots.
 - Wallet monitor page for Predict wallet positions.
 - Position markets from monitored wallets auto-merge into favorites.
@@ -46,7 +46,7 @@ Implemented:
 
 ## Known Limitations
 
-- Event progress is based on Google News RSS token overlap over a 48 hour window. It does not monitor project Discord, X posts, or official blogs directly.
+- GPT impact briefs depend on `OPENAI_API_KEY`. If OpenAI is not configured or fails, the report still sends price changes and fallback rows.
 - Arbitrary-address open orders remain unavailable because Predict's documented orders API requires authenticated user context. Self-wallet open orders are supported after wallet signing.
 - If Predict returns the login wallet as `accountAddress` but the UI stores positions in a different internal wallet, manually add the internal wallet for position monitoring. Open-order monitoring still depends on the JWT's account context.
 - If the Predict JWT expires, reconnect and sign again from the wallet monitor page.
@@ -54,6 +54,6 @@ Implemented:
 ## Next Useful Improvements
 
 - Add a favicon to avoid the harmless `favicon.ico` 404 in browser console.
-- Add a direct official-source watcher for X/blog/TGE announcements if report quality becomes important.
+- Add exact market-profile overrides for recurring markets whose settlement wording needs more precision than the generic title patterns.
 - Add a lightweight UI test for search focus and favorite scroll preservation.
 - Consider rotating the Feishu webhook/signing secret because the values were shared in the chat on 2026-05-19.
