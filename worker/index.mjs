@@ -819,8 +819,8 @@ async function matrixTextFromBlob(blob, compression) {
   return new TextDecoder().decode(bytes);
 }
 
-async function decodeBacktestMatrix(blob, compression) {
-  return parseBacktestMatrixPayload(await matrixTextFromBlob(blob, compression));
+async function decodeBacktestMatrix(blob, compression, options = {}) {
+  return parseBacktestMatrixPayload(await matrixTextFromBlob(blob, compression), options);
 }
 
 function backtestAxes() {
@@ -828,6 +828,23 @@ function backtestAxes() {
     buyPrices: BUY_PRICE_LABELS,
     sellPrices: SELL_PRICE_LABELS,
   };
+}
+
+function parseBacktestFields(value) {
+  const fields = String(value || "")
+    .split(",")
+    .map((field) => field.trim())
+    .filter((field) => ["buyShares", "pnl", "sellShares"].includes(field));
+  return fields.length ? fields : null;
+}
+
+function pickBacktestMatrixFields(matrix, fields) {
+  if (!fields) return matrix;
+  const picked = {};
+  for (const field of fields) {
+    picked[field] = matrix?.[field] || [];
+  }
+  return picked;
 }
 
 async function readBacktestMeta(env) {
@@ -858,6 +875,7 @@ async function readBacktestHeatmap(env, params) {
   const end = parseUtcDay(params.get("end"));
   const cutoff = parseBacktestCutoff(params.get("cutoff"));
   const intervals = parseBacktestIntervals(params.get("intervals"));
+  const fields = parseBacktestFields(params.get("fields"));
   if (!start || !end || start > end) return { error: "invalid_date_range" };
   if (!cutoff) return { error: "invalid_cutoff" };
   if (!intervals.length) return { error: "invalid_intervals" };
@@ -880,7 +898,7 @@ async function readBacktestHeatmap(env, params) {
          WHERE day >= ? AND day <= ? AND interval = ? AND cutoff_minutes = ? AND perspective = ?`,
       ).bind(start, end, interval, effectiveCutoff, perspective).all();
       for (const row of rows.results || []) {
-        addBacktestMatrices(byPerspective[perspective], await decodeBacktestMatrix(row.matrix_blob, row.compression));
+        addBacktestMatrices(byPerspective[perspective], await decodeBacktestMatrix(row.matrix_blob, row.compression, { fields }));
         dataRows += 1;
       }
     }
@@ -888,7 +906,7 @@ async function readBacktestHeatmap(env, params) {
 
   return {
     axes: backtestAxes(),
-    no: byPerspective.no,
+    no: pickBacktestMatrixFields(byPerspective.no, fields),
     summary: {
       cutoff,
       dataRows,
@@ -899,7 +917,7 @@ async function readBacktestHeatmap(env, params) {
       start,
       yes: summarizeBacktestMatrix(byPerspective.yes),
     },
-    yes: byPerspective.yes,
+    yes: pickBacktestMatrixFields(byPerspective.yes, fields),
   };
 }
 

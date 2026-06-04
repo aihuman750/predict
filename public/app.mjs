@@ -568,30 +568,6 @@ function backtestSelectedDays() {
   };
 }
 
-function heatmapColor(value, scale) {
-  const number = Number(value) || 0;
-  const min = Number(scale.min);
-  const max = Number(scale.max);
-  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return "background:var(--bg-3);color:var(--muted)";
-  const normalized = Math.max(0, Math.min(1, (number - min) / (max - min)));
-  const red = Math.round(34 + normalized * 205);
-  const green = Math.round(184 - normalized * 116);
-  const blue = Math.round(110 - normalized * 70);
-  const alpha = 0.22 + Math.abs(normalized - 0.5) * 0.9;
-  return `background:rgba(${red},${green},${blue},${alpha.toFixed(2)});color:${normalized > 0.72 ? "#fff" : "var(--ink)"}`;
-}
-
-function heatmapScale() {
-  const values = [
-    ...(state.backtest.heatmap?.yes?.pnl || []),
-    ...(state.backtest.heatmap?.no?.pnl || []),
-  ].map(Number).filter(Number.isFinite);
-  return {
-    max: values.length ? Math.max(...values) : 0,
-    min: values.length ? Math.min(...values) : 0,
-  };
-}
-
 function shortAddress(address) {
   return `${String(address).slice(0, 6)}...${String(address).slice(-4)}`;
 }
@@ -1057,8 +1033,20 @@ function renderBacktestHeatmap(title, matrix) {
   const axes = state.backtest.heatmap?.axes || state.backtest.meta?.axes || { buyPrices: [], sellPrices: [] };
   const buyPrices = axes.buyPrices || [];
   const sellPrices = axes.sellPrices || [];
-  const scale = heatmapScale();
   const cells = matrix?.pnl || [];
+  const columnMaxIndexes = buyPrices.map((_, buyIndex) => {
+    let maxIndex = -1;
+    let maxPnl = -Infinity;
+    for (let sellIndex = 0; sellIndex < sellPrices.length; sellIndex += 1) {
+      const cellIndex = sellIndex * buyPrices.length + buyIndex;
+      const pnl = Number(matrix?.pnl?.[cellIndex]);
+      if (Number.isFinite(pnl) && pnl > maxPnl) {
+        maxIndex = cellIndex;
+        maxPnl = pnl;
+      }
+    }
+    return maxIndex;
+  });
 
   return `
     <section class="heatmap-panel">
@@ -1075,6 +1063,7 @@ function renderBacktestHeatmap(title, matrix) {
             ${buyPrices.map((buyPrice, buyIndex) => {
               const cellIndex = sellIndex * buyPrices.length + buyIndex;
               const pnl = Number(matrix?.pnl?.[cellIndex] || 0);
+              const hasShareMetrics = Array.isArray(matrix?.buyShares) && Array.isArray(matrix?.sellShares);
               const buyShares = Number(matrix?.buyShares?.[cellIndex] || 0);
               const storedCost = Number(matrix?.cost?.[cellIndex]);
               const cost = Number.isFinite(storedCost) ? storedCost : buyShares * Number(buyPrice);
@@ -1083,13 +1072,18 @@ function renderBacktestHeatmap(title, matrix) {
               const titleText = [
                 `买入 ${buyPrice}`,
                 `卖出 ${sellPrice === "HOLD_EXPIRY" ? "持有到期" : sellPrice}`,
-                `成本 ${formatBacktestMetric(cost)}U`,
-                `回款 ${formatBacktestMetric(payout)}U`,
-                `买入份额 ${formatBacktestMetric(buyShares)}`,
-                `卖出份额 ${formatBacktestMetric(matrix?.sellShares?.[cellIndex] || 0)}`,
+                ...(hasShareMetrics
+                  ? [
+                      `成本 ${formatBacktestMetric(cost)}U`,
+                      `回款 ${formatBacktestMetric(payout)}U`,
+                      `买入份额 ${formatBacktestMetric(buyShares)}`,
+                      `卖出份额 ${formatBacktestMetric(matrix?.sellShares?.[cellIndex] || 0)}`,
+                    ]
+                  : []),
                 `利润 ${formatBacktestMetric(pnl)}U`,
               ].join(" · ");
-              return `<div class="heatmap-cell" style="${heatmapColor(pnl, scale)}" title="${escapeHtml(titleText)}">${escapeHtml(formatProfitText(pnl))}</div>`;
+              const isColumnMax = columnMaxIndexes[buyIndex] === cellIndex;
+              return `<div class="heatmap-cell ${isColumnMax ? "column-max" : ""}" title="${escapeHtml(titleText)}">${escapeHtml(formatProfitText(pnl))}</div>`;
             }).join("")}
           `).join("")}
         </div>
@@ -1822,6 +1816,7 @@ async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = tru
     const params = new URLSearchParams({
       cutoff: String(state.backtest.cutoffMinutes),
       end: selected.end,
+      fields: "pnl",
       intervals: intervals.join(","),
       start: selected.start,
     });

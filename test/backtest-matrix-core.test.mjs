@@ -180,3 +180,15 @@ test("serialized matrices keep only compact heatmap fields", () => {
   assert.equal(parsed.pnl[0], 95.988);
   assert.equal(parsed.sellShares[0], 4.5);
 });
+
+test("serialized matrices can be decoded with only pnl fields", () => {
+  const matrix = createEmptyBacktestMatrix();
+  matrix.buyShares[0] = 100.1234;
+  matrix.pnl[0] = 95.9876;
+  matrix.sellShares[0] = 4.5;
+
+  const parsed = parseBacktestMatrixPayload(serializeBacktestMatrix(matrix), { fields: ["pnl"] });
+
+  assert.deepEqual(Object.keys(parsed), ["pnl"]);
+  assert.equal(parsed.pnl[0], 95.988);
+});

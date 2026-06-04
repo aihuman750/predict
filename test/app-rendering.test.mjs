@@ -51,6 +51,10 @@ test("app exposes the strategy backtest view and heatmap API wiring", () => {
   assert.match(appSource, /label:\s*"策略回测"/);
   assert.match(appSource, /renderBacktestPage/);
   assert.match(appSource, /renderBacktestHeatmap/);
+  assert.match(appSource, /columnMaxIndexes/);
+  assert.match(appSource, /column-max/);
+  assert.match(appSource, /fields:\s*"pnl"/);
+  assert.doesNotMatch(appSource, /function heatmapColor/);
   assert.match(appSource, /\/api\/backtest\/meta/);
   assert.match(appSource, /\/api\/backtest\/heatmap/);
 });

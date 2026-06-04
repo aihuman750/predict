@@ -5,6 +5,11 @@ const DEFAULT_SHARES = 100;
 export const HOLD_EXPIRY = "HOLD_EXPIRY";
 const EPSILON = 1e-9;
 const STORED_MATRIX_KEYS = ["buyShares", "pnl", "sellShares"];
+const COMPACT_MATRIX_KEYS = {
+  buyShares: "b",
+  pnl: "p",
+  sellShares: "s",
+};
 
 export const BACKTEST_INTERVAL_MINUTES = {
   "1h": 60,
@@ -276,29 +281,78 @@ export function serializeBacktestMatrix(matrix) {
   });
 }
 
-export function parseBacktestMatrixPayload(value) {
+function normalizeMatrixFields(fields) {
+  if (!Array.isArray(fields) || !fields.length) return STORED_MATRIX_KEYS;
+  const requested = fields.filter((field) => STORED_MATRIX_KEYS.includes(field));
+  return requested.length ? requested : STORED_MATRIX_KEYS;
+}
+
+function extractJsonArrayProperty(text, property) {
+  const needle = `"${property}":[`;
+  const start = text.indexOf(needle);
+  if (start < 0) return null;
+  const arrayStart = start + needle.length - 1;
+  let depth = 0;
+  for (let index = arrayStart; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "[") depth += 1;
+    if (char === "]") {
+      depth -= 1;
+      if (depth === 0) return text.slice(arrayStart, index + 1);
+    }
+  }
+  return null;
+}
+
+function parseCompactScale(text) {
+  const match = /"scale":([0-9.]+)/.exec(text);
+  const scale = match ? Number(match[1]) : STORED_MATRIX_SCALE;
+  return Number.isFinite(scale) && scale > 0 ? scale : STORED_MATRIX_SCALE;
+}
+
+function expandStoredArray(values, scale) {
+  const source = Array.isArray(values) ? values : [];
+  return Array.from({ length: BUY_PRICE_MICROS.length * SELL_PRICE_MICROS.length }, (_, index) => {
+    const number = Number(source[index] || 0);
+    return Number.isFinite(number) ? number / scale : 0;
+  });
+}
+
+function parseCompactMatrixPayloadFields(text, fields) {
+  if (!text.includes('"version":2') || !text.includes('"m"')) return null;
+  const scale = parseCompactScale(text);
+  const result = {};
+  for (const field of fields) {
+    const property = COMPACT_MATRIX_KEYS[field];
+    const arrayText = property ? extractJsonArrayProperty(text, property) : null;
+    if (!arrayText) return null;
+    result[field] = expandStoredArray(JSON.parse(arrayText), scale);
+  }
+  return result;
+}
+
+export function parseBacktestMatrixPayload(value, options = {}) {
+  const fields = normalizeMatrixFields(options.fields);
+  if (typeof value === "string" && fields.length < STORED_MATRIX_KEYS.length) {
+    const compact = parseCompactMatrixPayloadFields(value, fields);
+    if (compact) return compact;
+  }
+
   const parsed = typeof value === "string" ? JSON.parse(value) : value;
   if (parsed?.version === 2 && parsed?.m) {
     const scale = Number(parsed.scale || STORED_MATRIX_SCALE);
-    const expandArray = (values) => {
-      const source = Array.isArray(values) ? values : [];
-      return Array.from({ length: BUY_PRICE_MICROS.length * SELL_PRICE_MICROS.length }, (_, index) => {
-        const value = Number(source[index] || 0);
-        return Number.isFinite(value) ? value / scale : 0;
-      });
-    };
-    return {
-      buyShares: expandArray(parsed.m.b),
-      pnl: expandArray(parsed.m.p),
-      sellShares: expandArray(parsed.m.s),
-    };
+    const result = {};
+    for (const field of fields) {
+      result[field] = expandStoredArray(parsed.m[COMPACT_MATRIX_KEYS[field]], scale);
+    }
+    return result;
   }
   const matrix = parsed?.matrix || parsed || {};
-  return {
-    buyShares: matrix.buyShares || emptyArray(),
-    pnl: matrix.pnl || emptyArray(),
-    sellShares: matrix.sellShares || emptyArray(),
-  };
+  const result = {};
+  for (const field of fields) {
+    result[field] = matrix[field] || emptyArray();
+  }
+  return result;
 }
 
 export function summarizeBacktestMatrix(matrix) {
