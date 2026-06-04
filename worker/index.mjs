@@ -876,7 +876,7 @@ async function readBacktestHeatmap(env, params) {
   const cutoff = parseBacktestCutoff(params.get("cutoff"));
   const intervals = parseBacktestIntervals(params.get("intervals"));
   const requestedFields = parseBacktestFields(params.get("fields"));
-  const fields = requestedFields || (intervals.length > 1 ? ["pnl"] : null);
+  const fields = requestedFields || ["pnl"];
   if (!start || !end || start > end) return { error: "invalid_date_range" };
   if (!cutoff) return { error: "invalid_cutoff" };
   if (!intervals.length) return { error: "invalid_intervals" };

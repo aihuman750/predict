@@ -112,6 +112,7 @@ let orderbookQueue = [];
 let orderbookQueueRunning = false;
 let orderbookQueueToken = 0;
 let backtestLoadTimer = 0;
+const BACKTEST_FALLBACK_CHUNK_DAYS = 7;
 
 function readView() {
   const hash = window.location.hash.replace(/^#\/?/, "");
@@ -1795,6 +1796,98 @@ async function loadBacktestMeta({ render = true } = {}) {
   }
 }
 
+function addUtcDays(day, amount) {
+  const date = new Date(`${day}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function splitBacktestDateRange(start, end, chunkDays = BACKTEST_FALLBACK_CHUNK_DAYS) {
+  const chunks = [];
+  let cursor = start;
+  while (cursor && cursor <= end) {
+    const chunkEnd = addUtcDays(cursor, Math.max(1, chunkDays) - 1);
+    const boundedEnd = chunkEnd > end ? end : chunkEnd;
+    chunks.push({ end: boundedEnd, start: cursor });
+    cursor = addUtcDays(boundedEnd, 1);
+  }
+  return chunks;
+}
+
+function buildBacktestHeatmapParams({ end, interval, start }) {
+  return new URLSearchParams({
+    cutoff: String(state.backtest.cutoffMinutes),
+    end,
+    fields: "pnl",
+    intervals: interval,
+    start,
+  });
+}
+
+async function fetchBacktestHeatmapPayload({ end, interval, start }) {
+  const params = buildBacktestHeatmapParams({ end, interval, start });
+  const response = await fetch(backtestEndpoint(`/api/backtest/heatmap?${params}`), { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+function summarizePnlCells(pnl) {
+  const values = (pnl || []).map(Number).filter(Number.isFinite);
+  return {
+    bestPnl: values.length ? Math.max(...values) : 0,
+    cells: pnl?.length || 0,
+    worstPnl: values.length ? Math.min(...values) : 0,
+  };
+}
+
+function mergePnlCells(target, source) {
+  for (let index = 0; index < target.length; index += 1) {
+    target[index] += Number(source?.[index] || 0);
+  }
+}
+
+function mergeBacktestHeatmapPayloads(payloads, { end, interval, start }) {
+  const axes = payloads.find((payload) => payload?.axes)?.axes || state.backtest.meta?.axes || { buyPrices: [], sellPrices: [] };
+  const cellCount = (axes.buyPrices || []).length * (axes.sellPrices || []).length;
+  const yesPnl = Array(cellCount).fill(0);
+  const noPnl = Array(cellCount).fill(0);
+  const normalizedCutoffs = {};
+  let dataRows = 0;
+
+  for (const payload of payloads) {
+    mergePnlCells(yesPnl, payload?.yes?.pnl);
+    mergePnlCells(noPnl, payload?.no?.pnl);
+    dataRows += Number(payload?.summary?.dataRows || 0);
+    Object.assign(normalizedCutoffs, payload?.summary?.normalizedCutoffs || {});
+  }
+
+  return {
+    axes,
+    no: { pnl: noPnl },
+    summary: {
+      cutoff: state.backtest.cutoffMinutes,
+      dataRows,
+      end,
+      intervals: [interval],
+      normalizedCutoffs,
+      no: summarizePnlCells(noPnl),
+      start,
+      yes: summarizePnlCells(yesPnl),
+    },
+    yes: { pnl: yesPnl },
+  };
+}
+
+async function loadBacktestHeatmapChunked({ end, interval, start }) {
+  const chunks = splitBacktestDateRange(start, end);
+  if (chunks.length <= 1) return fetchBacktestHeatmapPayload({ end, interval, start });
+  const payloads = [];
+  for (const chunk of chunks) {
+    payloads.push(await fetchBacktestHeatmapPayload({ ...chunk, interval }));
+  }
+  return mergeBacktestHeatmapPayloads(payloads, { end, interval, start });
+}
+
 async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = true } = {}) {
   const selected = backtestSelectedDays();
   const interval = state.backtest.interval || "5m";
@@ -1805,20 +1898,17 @@ async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = tru
   if (renderLoading) renderPage({ preserveScroll });
 
   try {
-    const params = new URLSearchParams({
-      cutoff: String(state.backtest.cutoffMinutes),
-      end: selected.end,
-      fields: "pnl",
-      intervals: interval,
-      start: selected.start,
-    });
-    const response = await fetch(backtestEndpoint(`/api/backtest/heatmap?${params}`), { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    state.backtest.heatmap = await response.json();
+    state.backtest.heatmap = await fetchBacktestHeatmapPayload({ end: selected.end, interval, start: selected.start });
     state.backtest.error = "";
   } catch (error) {
-    console.error(error);
-    state.backtest.error = "回测矩阵读取失败";
+    console.warn(error);
+    try {
+      state.backtest.heatmap = await loadBacktestHeatmapChunked({ end: selected.end, interval, start: selected.start });
+      state.backtest.error = "";
+    } catch (fallbackError) {
+      console.error(fallbackError);
+      state.backtest.error = "回测矩阵读取失败";
+    }
   } finally {
     state.backtest.loading = false;
     renderPage({ preserveScroll });

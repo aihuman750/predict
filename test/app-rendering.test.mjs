@@ -57,6 +57,8 @@ test("app exposes the strategy backtest view and heatmap API wiring", () => {
   assert.doesNotMatch(appSource, /intervals:\s*new Set/);
   assert.doesNotMatch(appSource, /intervals:\s*intervals\.join/);
   assert.match(appSource, /fields:\s*"pnl"/);
+  assert.match(appSource, /function loadBacktestHeatmapChunked/);
+  assert.match(appSource, /function mergeBacktestHeatmapPayloads/);
   assert.doesNotMatch(appSource, /function heatmapColor/);
   assert.match(appSource, /\/api\/backtest\/meta/);
   assert.match(appSource, /\/api\/backtest\/heatmap/);

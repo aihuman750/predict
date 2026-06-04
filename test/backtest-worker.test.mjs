@@ -139,6 +139,8 @@ test("backtest heatmap merges daily matrices and caps cutoff by interval duratio
   const cellIndex = holdIndex * BUY_PRICE_MICROS.length + buyIndex;
   assert.equal(payload.summary.normalizedCutoffs["5m"], 5);
   assert.equal(payload.summary.dataRows, 3);
+  assert.deepEqual(Object.keys(payload.yes), ["pnl"]);
+  assert.equal(payload.yes.buyShares, undefined);
   assert.equal(payload.yes.pnl[cellIndex], 30);
   assert.equal(payload.no.pnl[cellIndex], -3);
 });
