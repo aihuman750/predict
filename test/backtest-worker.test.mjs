@@ -173,6 +173,23 @@ test("backtest heatmap can return pnl-only matrices", async () => {
   assert.equal(payload.yes.buyShares, undefined);
 });
 
+test("backtest heatmap keeps legacy multi-interval requests pnl-only", async () => {
+  const response = await handleRequest(
+    new Request("https://worker.test/api/backtest/heatmap?start=2026-06-01&end=2026-06-01&intervals=5m,15m&cutoff=5"),
+    {
+      BACKTEST_DB: new MemoryD1([
+        row({ interval: "5m", pnl: 12 }),
+        row({ cutoff: 5, interval: "15m", pnl: 30 }),
+      ]),
+    },
+  );
+
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(Object.keys(payload.yes), ["pnl"]);
+  assert.equal(payload.yes.buyShares, undefined);
+});
+
 test("backtest heatmap validates request parameters", async () => {
   const response = await handleRequest(
     new Request("https://worker.test/api/backtest/heatmap?start=bad&end=2026-06-02&intervals=5m&cutoff=10"),
