@@ -49,7 +49,7 @@ const viewMeta = {
   },
   backtest: {
     label: "策略回测",
-    subtitle: "基于真实历史成交，按日期、市场周期和买入截止时间聚合策略收益矩阵。",
+    subtitle: "基于真实历史成交，按日期、单个市场周期和买入截止时间聚合策略收益矩阵。",
     title: "策略回测",
   },
 };
@@ -100,7 +100,7 @@ const state = {
     endIndex: 0,
     error: "",
     heatmap: null,
-    intervals: new Set(["1h", "15m", "5m"]),
+    interval: "5m",
     loading: false,
     meta: null,
     startIndex: 0,
@@ -966,7 +966,7 @@ function renderBacktestPage() {
   const days = backtestDays();
   const selected = backtestSelectedDays();
   const availableIntervals = state.backtest.meta?.intervals?.map((row) => row.interval) || ["1h", "15m", "5m"];
-  const selectedIntervals = [...state.backtest.intervals];
+  const selectedInterval = state.backtest.interval || "5m";
   const summary = state.backtest.heatmap?.summary;
 
   return `
@@ -997,7 +997,7 @@ function renderBacktestPage() {
         <div class="seg interval-seg">
           ${["1h", "15m", "5m"].map((interval) => `
             <button
-              class="seg-item ${state.backtest.intervals.has(interval) ? "active" : ""}"
+              class="seg-item ${selectedInterval === interval ? "active" : ""}"
               data-backtest-interval="${interval}"
               ${availableIntervals.includes(interval) ? "" : "disabled"}
             >${interval}</button>
@@ -1009,7 +1009,7 @@ function renderBacktestPage() {
 
     <section class="backtest-summary">
       ${statHtml("时间范围", selected.start && selected.end ? `${selected.start}<span> 至 </span>${selected.end}` : "-", "UTC 日期")}
-      ${statHtml("市场周期", selectedIntervals.length ? selectedIntervals.join(" / ") : "-", summary?.normalizedCutoffs ? `实际 cutoff ${Object.entries(summary.normalizedCutoffs).map(([key, value]) => `${key}:${value}`).join(" · ")}` : "")}
+      ${statHtml("市场周期", selectedInterval, summary?.normalizedCutoffs ? `实际 cutoff ${Object.entries(summary.normalizedCutoffs).map(([key, value]) => `${key}:${value}`).join(" · ")}` : "")}
       ${statHtml("Yes 最优格", summary ? formatBacktestMetric(summary.yes.bestPnl) : "-", "累计利润 U", "accent")}
       ${statHtml("No 最优格", summary ? formatBacktestMetric(summary.no.bestPnl) : "-", "累计利润 U", "accent")}
     </section>
@@ -1299,11 +1299,8 @@ function bindEvents() {
   for (const button of document.querySelectorAll("[data-backtest-interval]")) {
     button.addEventListener("click", () => {
       const interval = button.dataset.backtestInterval;
-      if (state.backtest.intervals.has(interval)) {
-        state.backtest.intervals.delete(interval);
-      } else {
-        state.backtest.intervals.add(interval);
-      }
+      if (!interval || state.backtest.interval === interval) return;
+      state.backtest.interval = interval;
       scheduleBacktestHeatmapLoad();
       renderPage({ preserveScroll: true });
     });
@@ -1800,13 +1797,8 @@ async function loadBacktestMeta({ render = true } = {}) {
 
 async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = true } = {}) {
   const selected = backtestSelectedDays();
-  const intervals = [...state.backtest.intervals];
+  const interval = state.backtest.interval || "5m";
   if (!state.backtest.meta || !selected.start || !selected.end) return;
-  if (!intervals.length) {
-    state.backtest.error = "请至少选择一个市场周期";
-    renderPage({ preserveScroll });
-    return;
-  }
 
   state.backtest.loading = true;
   state.backtest.error = "";
@@ -1817,7 +1809,7 @@ async function loadBacktestHeatmap({ preserveScroll = false, renderLoading = tru
       cutoff: String(state.backtest.cutoffMinutes),
       end: selected.end,
       fields: "pnl",
-      intervals: intervals.join(","),
+      intervals: interval,
       start: selected.start,
     });
     const response = await fetch(backtestEndpoint(`/api/backtest/heatmap?${params}`), { cache: "no-store" });
